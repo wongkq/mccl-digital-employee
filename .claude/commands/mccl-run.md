@@ -15,6 +15,11 @@ description: 跑一轮完整的MCCL开发验证流水线：开发→监督→测
 
 调度四个子代理一律用你所在harness的子代理调度工具（视版本叫`Task`或`Agent`，认能力不认名字），`subagent_type`填对应agent名：`mccl-developer`、`mccl-tester`、`mccl-reporter`、`mccl-supervisor`。每次调用的`prompt`里必须写清楚：本轮要读哪些文件（绝对路径）、本轮产物写到哪个目录（绝对路径）。子代理各自的定义文件（`.claude/agents/*.md`）里"run目录"是抽象说法，具体指向哪个路径由你在prompt里明确给出——不给具体路径，子代理没有办法知道该往哪写。
 
+**产物文件名带序号的，prompt里必须给出完整文件名，不能只给目录。** 具体有两处，它们的序号只有你知道（子代理不共享你的循环变量，也不该去反推）：
+
+- `mccl-reporter`：写到`$RUN_DIR/attempt-<attempt>/report-<report_attempt>.md`——把`<report_attempt>`替换成本次循环的实际值再写进prompt（例如`report-2.md`）。给成目录或`report.md`，报告就会覆盖上一轮、或落在第96行`cp`找不到的地方，报告内循环的历史和全绿路径的最后一步一起断掉。
+- `mccl-supervisor(stage=report)`：写到`$RUN_DIR/attempt-<attempt>/verdict-report-<report_attempt>.md`，同样给完整文件名。另两道卡点（`stage=dev`/`stage=test`）的verdict文件名不带序号，但**路径必须含`attempt-<attempt>/`子目录**，也一并在prompt里给全。
+
 你自己只准用Bash做以下这类只读/建目录/写自己产物的操作：`mkdir -p`、`date`、`head -1`（解析verdict）、`cat`/写入`task.md`/`timeline.md`/`escalation.md`、`cp`（拷贝最终报告）、检查文件是否存在。不得用Bash改源码、编译、跑mpirun。
 
 ## 1. run目录布局（权威版本，逐字照此实现，不得用平铺布局）

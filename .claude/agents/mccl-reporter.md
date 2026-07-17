@@ -35,7 +35,9 @@ tools: Read, Grep, Glob, Write
 - `test-result.md`——每场景的命令、退出码、关键数据、PASS/FAIL判定
 - `test-anomaly.md`——仅在触发hang处置时存在
 
-## 4. 产出`report.md`
+## 4. 产出`report-<N>.md`
+
+**文件名由主控在prompt里给出完整路径，照它写，不要自己拼、不要写成`report.md`。** `N`是报告内循环的次数（同一批开发/测试产物第几次被撰写成报告）：第一次是`report-1.md`，被监督员判REWORK后重写的那次是`report-2.md`。**不得覆盖前一次的`report-N.md`**——历史要留着，监督员在report卡点靠数这些文件判断报告循环是否超2轮（见`references/supervisor-checklists/report.md`第7条），主控也靠这个文件名把通过的那份拷成`final-report.md`。你把第2次的报告写回`report-1.md`，等于抹掉了第1次的记录，这道检查就失效了。
 
 结构固定，八个部分，顺序如下：
 
