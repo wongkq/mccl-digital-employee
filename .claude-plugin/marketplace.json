@@ -1,19 +1,16 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "mccl-digital-employee",
-  "description": "MCCL通信库的数字员工工具包",
+  "description": "MCCL通信库的数字员工工具包：开发/测试/报告/监督四个子代理与三道监督卡点",
   "owner": {
     "name": "Chunkzjv"
   },
   "plugins": [
     {
       "name": "mccl-digital-employee",
-      "description": "MCCL通信库开发验证流水线：四个子代理 + 三道监督卡点 + 分层重试与诊断门",
+      "description": "MCCL通信库开发验证流水线：四个子代理 + 三道监督卡点 + 分层重试与诊断门。监督员只读产物不采信声明，报告工程师禁Bash做物理隔离。",
       "category": "development",
-      "source": {
-        "source": "git-subdir",
-        "path": "plugins/mccl-digital-employee"
-      }
+      "source": "./plugins/mccl-digital-employee"
     }
   ]
 }
