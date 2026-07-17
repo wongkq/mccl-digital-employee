@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# 新机器一次性配置：让本机能免密登录 Node 0。
+#
+# 为什么只配 Node 0 一台：
+#   工具包的规则是"一律经 $MCCL_NODE0_IP 跳转"（references/mccl-remote-ops.md 第5节）。
+#   本机 → Node 0 需要免密；Node 0 → Node 1/2/3 是节点之间的事，mpirun 跨节点本来就
+#   依赖它、早已配好。所以换机器只需配这一条链路。
+#
+# 密码只在 ssh-copy-id 时交互输入一次，不存盘、不进环境变量、不进日志。
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  echo "错误：不在git仓库里。请在MCCL仓库根目录运行。" >&2; exit 1; }
+ENV_FILE="$REPO_ROOT/mccl-env.sh"
+[ -f "$ENV_FILE" ] || {
+  echo "错误：找不到 $ENV_FILE" >&2
+  echo "请先： cp <插件>/mccl-env.sh.example $ENV_FILE  然后填入真实值" >&2; exit 1; }
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+
+: "${MCCL_NODE0_IP:?mccl-env.sh 里缺 MCCL_NODE0_IP}"
+: "${MCCL_NODE1_IP:?mccl-env.sh 里缺 MCCL_NODE1_IP}"
+: "${MCCL_NODE2_IP:?mccl-env.sh 里缺 MCCL_NODE2_IP}"
+: "${MCCL_NODE3_IP:?mccl-env.sh 里缺 MCCL_NODE3_IP}"
+
+SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new"
+fail=0
+
+echo "== 1. 本机 → Node 0 ($MCCL_NODE0_IP) 免密 =="
+if ssh $SSH_OPTS "root@$MCCL_NODE0_IP" true 2>/dev/null; then
+  echo "   已通，无需配置"
+else
+  # 先分清"连不上"和"连得上但没配密钥"。
+  # 不做这个区分的话，主机不可达时会一头扎进 ssh-copy-id 然后阻塞等密码——
+  # 交互式挂起在agent环境里等于卡死。
+  probe="$(ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new \
+           "root@$MCCL_NODE0_IP" true 2>&1)"
+  case "$probe" in
+    *"Permission denied"*)
+      : ;;  # 主机可达、SSH服务在、只是没有密钥 → 正是 ssh-copy-id 要解决的
+    *)
+      echo "   连不上 $MCCL_NODE0_IP，不是密钥的问题：" >&2
+      echo "     $probe" >&2
+      echo "   先确认IP对不对（mccl-env.sh 第8行）、网络通不通、SSH服务在不在。" >&2
+      echo "   主机都不可达时配密钥没有意义，这里直接停，不进入密码提示。" >&2
+      exit 1 ;;
+  esac
+  echo "   主机可达但未配密钥，开始配置。"
+  if [ ! -f "$HOME/.ssh/id_rsa.pub" ] && [ ! -f "$HOME/.ssh/id_ed25519.pub" ]; then
+    echo "   本机没有ssh公钥，生成中（无密码短语）..."
+    ssh-keygen -t ed25519 -N '' -f "$HOME/.ssh/id_ed25519" -q || { echo "   ssh-keygen失败"; exit 1; }
+  fi
+  echo "   接下来会提示输入 root@$MCCL_NODE0_IP 的密码（只用这一次，不存盘）："
+  ssh-copy-id -o StrictHostKeyChecking=accept-new "root@$MCCL_NODE0_IP" || {
+    echo "   ssh-copy-id 失败" >&2; exit 1; }
+  ssh $SSH_OPTS "root@$MCCL_NODE0_IP" true 2>/dev/null \
+    && echo "   配置成功" || { echo "   配置后仍不通" >&2; exit 1; }
+fi
+
+echo "== 2. Node 0 → Node 1/2/3 免密（工具包依赖，本机配不了，只检查）=="
+for n in 1 2 3; do
+  eval "ip=\$MCCL_NODE${n}_IP"
+  if ssh $SSH_OPTS "root@$MCCL_NODE0_IP" "ssh $SSH_OPTS root@$ip true" 2>/dev/null; then
+    echo "   Node 0 → Node $n ($ip)  通"
+  else
+    echo "   Node 0 → Node $n ($ip)  不通 ← 分发libmccl.so和跨节点mpirun都会失败" >&2
+    fail=1
+  fi
+done
+
+echo "== 3. 容器 ($MCCL_CONTAINER) 可达 =="
+if ssh $SSH_OPTS "root@$MCCL_NODE0_IP" "docker exec $MCCL_CONTAINER true" 2>/dev/null; then
+  echo "   通"
+else
+  echo "   不通 ← 编译会失败。检查容器名是否为 $MCCL_CONTAINER、是否在运行" >&2
+  fail=1
+fi
+
+echo
+if [ "$fail" -eq 0 ]; then
+  echo "全部就绪。可以跑 /mccl-run 了。"
+else
+  echo "有不通的链路（见上）。Node 0 → Node 1/2/3 需要在 Node 0 上配，不在本机。" >&2
+fi
+exit "$fail"

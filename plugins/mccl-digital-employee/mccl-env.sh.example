@@ -2,6 +2,11 @@
 # 拷贝为 mccl-env.sh 并填入真实值。mccl-env.sh 不入库（见 .gitignore）。
 # 所有 agent 从此文件取环境值，不得硬编码。
 
+# 换机器/换IP时：改完下面的IP，跑一次
+#   bash <插件>/bin/mccl-setup-ssh
+# 它只需配"本机 → NODE0"一条链路（工具包一律经NODE0跳转），
+# 并检查 NODE0 → NODE1/2/3 和容器是否可达。密码只在交互时输入一次，不存盘。
+
 # --- 四个计算节点 ---
 # NODE0 是唯一的编译节点（容器宿主）。NODE1/2/3 只接受 scp 的 libmccl.so，
 # 禁止在其上编译或修改源码。
