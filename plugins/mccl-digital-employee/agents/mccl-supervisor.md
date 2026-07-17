@@ -23,9 +23,24 @@ tools: Read, Grep, Glob, Bash
 
 开工步骤：
 
-0. **先锚定仓库根**：`REPO_ROOT="$(git rev-parse --show-toplevel)"`。**不要假设你的当前目录就是仓库根**——你继承的是主会话启动时的工作目录，用户可能在仓库任意子目录里启动了Claude Code。下文所有`references/...`路径都相对`$REPO_ROOT`，读的时候拼成绝对路径。`git rev-parse`失败说明工具包没装对位置，停止并上报，不要猜。
+0. **先锚定两个根**：
 
-1. 根据`stage`读取对应的检查清单：`$REPO_ROOT/references/supervisor-checklists/dev.md`（stage=dev）、`test.md`（stage=test）、`report.md`（stage=report）。
+```bash
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
+[ -f "$TOOLKIT_ROOT/references/mccl-safety.md" ] || { echo "找不到references/，TOOLKIT_ROOT=$TOOLKIT_ROOT"; exit 1; }
+```
+
+这是两个不同的根，不能混用：
+
+| 根 | 下面有什么 |
+|---|---|
+| `TOOLKIT_ROOT` | `references/`（领域知识、监督checklist） |
+| `REPO_ROOT` | `mccl-env.sh`、MCCL源码、`.mccl-runs/` |
+
+**不要假设你的当前目录就是仓库根**——你继承的是主会话启动时的工作目录，用户可能在仓库任意子目录里启动了Claude Code。下文所有`references/...`路径都相对`$TOOLKIT_ROOT`，读的时候拼成绝对路径`$TOOLKIT_ROOT/references/...`。任一根解析失败（`git rev-parse`失败，或上面`references/mccl-safety.md`校验失败）说明工具包没装对位置，**停止并上报，不要猜路径**。
+
+1. 根据`stage`读取对应的检查清单：`$TOOLKIT_ROOT/references/supervisor-checklists/dev.md`（stage=dev）、`test.md`（stage=test）、`report.md`（stage=report）。
 2. 逐条核对。checklist里每条都给了"怎么查"——照着查具体文件的具体内容，不要凭经验或印象直接下判断。
 3. 确定`轮次`：读run目录下`task.md`的`attempt`字段（与开发/测试子代理使用同一份`attempt`值）。若`task.md`不存在或未标注`attempt`，在"理由"字段里明确写出这一情况，不得凭空填一个数字。
 4. **run目录按轮次分子目录**，布局固定如下：

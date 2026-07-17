@@ -10,19 +10,29 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 
 依次做：
 
-1. **先锚定仓库根，再做任何事**：
+1. **先锚定两个根，再做任何事**：
 
 ```bash
-REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT" && source "$REPO_ROOT/mccl-env.sh"
+REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT"
+source "$REPO_ROOT/mccl-env.sh"
+TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
+[ -f "$TOOLKIT_ROOT/references/mccl-safety.md" ] || { echo "找不到references/，TOOLKIT_ROOT=$TOOLKIT_ROOT"; exit 1; }
 ```
 
-**不要假设你的当前目录就是仓库根。**你继承的是主会话启动时的工作目录——用户可能在仓库的任意子目录里启动了Claude Code。本文档下文所有相对路径（`references/...`、`mccl-env.sh`）都相对`$REPO_ROOT`，用Read工具读它们时请拼成绝对路径`$REPO_ROOT/references/...`。
+这是两个不同的根，不能混用：
 
-`git rev-parse` 失败（不在git仓库里）说明工具包没装对位置，**停止并上报**，不要猜路径。
-2. 读`references/mccl-safety.md`（硬禁令，8条，违反ABORT或REWORK）。
-3. 读`references/mccl-build-pitfalls.md`（编译陷阱，尤其第2条macaify增量编译坑）。
-4. 读`references/mccl-remote-ops.md`（远程调用模式：ssh+docker exec引号嵌套、`/opt/maca/lib`双重身份、4节点分发方式差异）。执行任何ssh/rsync/docker exec/scp命令前，先确认命令形态与该文档一致，不要凭感觉拼引号。
-5. 若本次任务涉及对称内存（symmetric memory）、FC kernel、`dev_runtime.cc`、`clique/`目录，额外读`references/mccl-domain.md`。
+| 根 | 下面有什么 |
+|---|---|
+| `TOOLKIT_ROOT` | `references/`（领域知识、监督checklist） |
+| `REPO_ROOT` | `mccl-env.sh`、MCCL源码、`.mccl-runs/` |
+
+**不要假设你的当前目录就是仓库根。**你继承的是主会话启动时的工作目录——用户可能在仓库的任意子目录里启动了Claude Code。`references/...`一律拼`$TOOLKIT_ROOT/`；`mccl-env.sh`、源码、run目录一律拼`$REPO_ROOT/`。用Read工具读`references/`时必须用绝对路径`$TOOLKIT_ROOT/references/...`。
+
+任一根解析失败（`git rev-parse`失败说明不在git仓库里；上面的`references/mccl-safety.md`校验失败说明`TOOLKIT_ROOT`没找对）都说明工具包没装对位置，**停止并上报，不要猜路径**。
+2. 读`$TOOLKIT_ROOT/references/mccl-safety.md`（硬禁令，8条，违反ABORT或REWORK）。
+3. 读`$TOOLKIT_ROOT/references/mccl-build-pitfalls.md`（编译陷阱，尤其第2条macaify增量编译坑）。
+4. 读`$TOOLKIT_ROOT/references/mccl-remote-ops.md`（远程调用模式：ssh+docker exec引号嵌套、`/opt/maca/lib`双重身份、4节点分发方式差异）。执行任何ssh/rsync/docker exec/scp命令前，先确认命令形态与该文档一致，不要凭感觉拼引号。
+5. 若本次任务涉及对称内存（symmetric memory）、FC kernel、`dev_runtime.cc`、`clique/`目录，额外读`$TOOLKIT_ROOT/references/mccl-domain.md`。
 
 这五步不可跳，每次开工都要做一遍，不因为"上一轮做过"而省略——你和上一轮的自己不共享上下文。
 
@@ -38,9 +48,9 @@ run目录下的`task.md`，包含：
 ## 3. 工作流
 
 1. 在`$MCCL_LOCAL_SRC`本地源码上做改动。
-2. `rsync`同步到编译节点：目标是`$MCCL_NODE0_IP`上的`$MCCL_REMOTE_SRC`（具体命令、`--exclude`含义见`references/mccl-remote-ops.md`第7、8节）。
-3. 进入`$MCCL_CONTAINER`容器，容器内执行编译（具体命令见第4节"编译内循环"与`references/mccl-build-pitfalls.md`；ssh+docker exec的引号嵌套写法见`references/mccl-remote-ops.md`第1节）。
-4. 分发编译产物`libmccl.so`。**编译流程只有`make -j50`、没有`make install`**，产物停在`$MCCL_REMOTE_SRC/build/`里，不会自己进任何lib目录——四个节点上mpirun要加载的那份，全靠这一步显式送过去。一共**四条命令**（完整命令见`references/mccl-remote-ops.md`第3节，照抄前先确认命令是否套了`docker exec`）：
+2. `rsync`同步到编译节点：目标是`$MCCL_NODE0_IP`上的`$MCCL_REMOTE_SRC`（具体命令、`--exclude`含义见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第7、8节）。
+3. 进入`$MCCL_CONTAINER`容器，容器内执行编译（具体命令见第4节"编译内循环"与`$TOOLKIT_ROOT/references/mccl-build-pitfalls.md`；ssh+docker exec的引号嵌套写法见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第1节）。
+4. 分发编译产物`libmccl.so`。**编译流程只有`make -j50`、没有`make install`**，产物停在`$MCCL_REMOTE_SRC/build/`里，不会自己进任何lib目录——四个节点上mpirun要加载的那份，全靠这一步显式送过去。一共**四条命令**（完整命令见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第3节，照抄前先确认命令是否套了`docker exec`）：
 
    - **Node 0 动作①**：`docker exec`进容器，容器内`cp`到容器内`/opt/maca/lib/`——给单节点8卡验证用。
    - **Node 0 动作②**：`docker exec`进容器，容器内`cp`到`$MCCL_MACA_LIB_DIR`——**给跨节点32卡验证用，这一条最容易漏**。该目录在`$MCCL_REMOTE_WORKDIR`下、容器内外是同一份（bind mount），所以容器内写进去宿主机的mpirun就能加载到；而动作①的`/opt/maca/lib`容器内外同名却是两份，宿主机根本看不见，**做了①不等于做了②**。
@@ -55,7 +65,7 @@ run目录下的`task.md`，包含：
 export MACA_PATH=$MCCL_MACA_PATH
 ```
 
-改了`.cc`/`.h`文件后必须先清macaify缓存再编译（见`references/mccl-build-pitfalls.md`第2条，不这么做编译会"假成功"——产物用的是旧代码却不报错）：
+改了`.cc`/`.h`文件后必须先清macaify缓存再编译（见`$TOOLKIT_ROOT/references/mccl-build-pitfalls.md`第2条，不这么做编译会"假成功"——产物用的是旧代码却不报错）：
 ```bash
 cd $MCCL_REMOTE_SRC
 rm -rf build/macaify
@@ -129,7 +139,7 @@ git diff > <run目录>/change.patch
 - 新增的编译warning（如果有，列出来；没有写"无"）
 - **五份`libmccl.so`的md5，逐个列出具体值**（编译通过才有）：
   1. 构建产物本身：`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`
-  2~5. 四个节点（**含Node 0**）上**mpirun实际会加载的那份**：`$MCCL_MACA_LIB_DIR/libmccl.so`——即`$MCCL_LD_LIBRARY_PATH`的库目录部分，**不是容器内`/opt/maca/lib`那份**（两者同名不同层，见`references/mccl-remote-ops.md`第2节）。Node 0这一份由第3节工作流的分发动作②产生，漏了动作②这里就对不上。
+  2~5. 四个节点（**含Node 0**）上**mpirun实际会加载的那份**：`$MCCL_MACA_LIB_DIR/libmccl.so`——即`$MCCL_LD_LIBRARY_PATH`的库目录部分，**不是容器内`/opt/maca/lib`那份**（两者同名不同层，见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第2节）。Node 0这一份由第3节工作流的分发动作②产生，漏了动作②这里就对不上。
 
   五个值必须完全一致。不一致说明分发没真正生效，属于编译未完成，不得交付。
   **必须写出具体md5值，不能写"已分发"、"已同步"这类无法核实的表述**——监督员和测试agent都要拿这五个值做核对。

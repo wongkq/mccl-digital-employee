@@ -10,17 +10,27 @@ tools: Read, Write, Grep, Glob, Bash
 
 依次做，每次开工都做一遍，不因为"上一轮做过"而省略——你和上一轮的自己不共享上下文：
 
-1. **先锚定仓库根，再做任何事**：
+1. **先锚定两个根，再做任何事**：
 
 ```bash
-REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT" && source "$REPO_ROOT/mccl-env.sh"
+REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT"
+source "$REPO_ROOT/mccl-env.sh"
+TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
+[ -f "$TOOLKIT_ROOT/references/mccl-safety.md" ] || { echo "找不到references/，TOOLKIT_ROOT=$TOOLKIT_ROOT"; exit 1; }
 ```
 
-**不要假设你的当前目录就是仓库根。**你继承的是主会话启动时的工作目录——用户可能在仓库的任意子目录里启动了Claude Code。本文档下文所有相对路径（`references/...`、`mccl-env.sh`）都相对`$REPO_ROOT`，用Read工具读它们时请拼成绝对路径`$REPO_ROOT/references/...`。
+这是两个不同的根，不能混用：
 
-`git rev-parse` 失败（不在git仓库里）说明工具包没装对位置，**停止并上报**，不要猜路径。
-2. 读`references/mccl-safety.md`（硬禁令，违反ABORT或REWORK；第3条"禁止重启远程节点"是本轮最容易踩的一条，见第5节）。
-3. 读`references/mccl-remote-ops.md`（远程调用模式手册）。你要跑的是跨节点32卡`mpirun`，该文档第0、4、6节讲得很清楚：**容器内没有ssh客户端，跨节点32卡验证必须在宿主机跑，不能进容器**；第5节讲SSH跳板规则——一律经`$MCCL_NODE0_IP`跳转，不依赖直连。执行任何ssh/scp命令前，先确认命令形态与该文档一致。
+| 根 | 下面有什么 |
+|---|---|
+| `TOOLKIT_ROOT` | `references/`（领域知识、监督checklist） |
+| `REPO_ROOT` | `mccl-env.sh`、MCCL源码、`.mccl-runs/` |
+
+**不要假设你的当前目录就是仓库根。**你继承的是主会话启动时的工作目录——用户可能在仓库的任意子目录里启动了Claude Code。`references/...`一律拼`$TOOLKIT_ROOT/`；`mccl-env.sh`、源码、run目录一律拼`$REPO_ROOT/`。用Read工具读`references/`时必须用绝对路径`$TOOLKIT_ROOT/references/...`。
+
+任一根解析失败（`git rev-parse`失败说明不在git仓库里；上面的`references/mccl-safety.md`校验失败说明`TOOLKIT_ROOT`没找对）都说明工具包没装对位置，**停止并上报，不要猜路径**。
+2. 读`$TOOLKIT_ROOT/references/mccl-safety.md`（硬禁令，违反ABORT或REWORK；第3条"禁止重启远程节点"是本轮最容易踩的一条，见第5节）。
+3. 读`$TOOLKIT_ROOT/references/mccl-remote-ops.md`（远程调用模式手册）。你要跑的是跨节点32卡`mpirun`，该文档第0、4、6节讲得很清楚：**容器内没有ssh客户端，跨节点32卡验证必须在宿主机跑，不能进容器**；第5节讲SSH跳板规则——一律经`$MCCL_NODE0_IP`跳转，不依赖直连。执行任何ssh/scp命令前，先确认命令形态与该文档一致。
 
 ## 2. 两个场景都必须跑，不得按改动范围裁剪
 
@@ -50,7 +60,7 @@ $MCCL_MPIRUN --allow-run-as-root -np $MCCL_NP \
 - 场景A：`<二进制>` = `$MCCL_PERF_BIN_ASYM`，不加`-R 2`。
 - 场景B：`<二进制>` = `$MCCL_PERF_BIN_SYM`，末尾加`-R 2`。
 
-**执行位置**：这条命令必须在宿主机层跑，不得进容器（容器内没有ssh，`-host`要求跨4节点连通性）。按`references/mccl-remote-ops.md`第5节，`$MCCL_NODE0_IP`是唯一与全部四节点连通的位置，且mpirun本身依赖宿主机ssh互通，与agent自身运行在哪台机器上无关。若你不是直接运行在能ssh通四节点的宿主机上，先跳到`$MCCL_NODE0_IP`的宿主机层（不套`docker exec`）再执行上面的命令：
+**执行位置**：这条命令必须在宿主机层跑，不得进容器（容器内没有ssh，`-host`要求跨4节点连通性）。按`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第5节，`$MCCL_NODE0_IP`是唯一与全部四节点连通的位置，且mpirun本身依赖宿主机ssh互通，与agent自身运行在哪台机器上无关。若你不是直接运行在能ssh通四节点的宿主机上，先跳到`$MCCL_NODE0_IP`的宿主机层（不套`docker exec`）再执行上面的命令：
 
 ```bash
 ssh root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在本地展开>"
@@ -61,7 +71,7 @@ ssh root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在本地展开>"
 跑任何mpirun之前，逐条核对，记入`test-preflight.md`（每条标注核对方式与结果）：
 
 - [ ] IP仅限`$MCCL_NODE0_IP`/`$MCCL_NODE1_IP`/`$MCCL_NODE2_IP`/`$MCCL_NODE3_IP`——检查本轮将要执行的所有ssh/scp/mpirun命令里出现的IP，逐个比对这四个变量的值，不得出现第五个IP。
-- [ ] `libmccl.so`四节点均已更新——**独立核对md5，不采信`dev-change.md`里开发写的md5声明**。做法：经`$MCCL_NODE0_IP`跳板，对四个节点（**含Node 0**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（宿主机层，即`$MCCL_LD_LIBRARY_PATH`的库目录部分，不是容器内`/opt/maca/lib`那份）分别`md5sum`，同时对`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`构建产物也`md5sum`一份作为基准，五个结果必须完全一致。任何一个不一致，本条判FAIL，不得继续跑测试，直接上报——**包括Node 0那一份**：Node 0虽然是编译节点，但产物停在`build/`里，需要一次单独的分发动作才会进`$MCCL_MACA_LIB_DIR`（见`references/mccl-remote-ops.md`第3节动作②），不能因为"库本来就是这台机器编的"就默认它已经到位。
+- [ ] `libmccl.so`四节点均已更新——**独立核对md5，不采信`dev-change.md`里开发写的md5声明**。做法：经`$MCCL_NODE0_IP`跳板，对四个节点（**含Node 0**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（宿主机层，即`$MCCL_LD_LIBRARY_PATH`的库目录部分，不是容器内`/opt/maca/lib`那份）分别`md5sum`，同时对`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`构建产物也`md5sum`一份作为基准，五个结果必须完全一致。任何一个不一致，本条判FAIL，不得继续跑测试，直接上报——**包括Node 0那一份**：Node 0虽然是编译节点，但产物停在`build/`里，需要一次单独的分发动作才会进`$MCCL_MACA_LIB_DIR`（见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第3节动作②），不能因为"库本来就是这台机器编的"就默认它已经到位。
 - [ ] `-np 32`，`-host`包含且仅包含四个IP的`:8`——核对方式：命令里的`-np`值等于`$MCCL_NP`，`-host`值逐字等于`$MCCL_HOST_SPEC`。
 - [ ] `MCCL_P2P_LEVEL`和`MCCL_PCIE_BUFFER_MODE`已配置——核对`-x`参数里`MCCL_P2P_LEVEL=PXB`、`MCCL_PCIE_BUFFER_MODE=1`均出现。
 - [ ] `btl_tcp_if_include`为`$MCCL_TCP_IF_INCLUDE`——核对命令里该值逐字等于该变量。
