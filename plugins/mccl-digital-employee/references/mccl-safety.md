@@ -6,7 +6,7 @@
 
 | # | 禁令 | 违反后果 |
 |---|---|---|
-| 1 | 禁止在NODE1/2/3（对应`$MCCL_NODE1_IP`/`$MCCL_NODE2_IP`/`$MCCL_NODE3_IP`）上编译或修改源码。这三台只接受scp过去的`libmccl.so` | ABORT |
+| 1 | 禁止在`$MCCL_NODES`中除第一个（编译节点，`$MCCL_NODE0_IP`）之外的任何节点上编译或修改源码。这些节点只接受scp过去的`libmccl.so` | ABORT |
 | 2 | 禁止修改`$MCCL_REMOTE_WORKDIR`之外的任何远程文件 | ABORT |
 | 3 | 禁止重启远程节点。mpirun hang超5分钟时，采集`dmesg`和IB状态后上报，**不重启** | ABORT |
 | 4 | 禁止`git push` | ABORT |
