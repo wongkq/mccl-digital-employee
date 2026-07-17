@@ -1,0 +1,8 @@
+{
+  "name": "mccl-digital-employee",
+  "version": "1.0.0",
+  "description": "MCCL通信库开发验证流水线：开发/测试/报告/监督四个子代理 + 三道监督卡点 + 分层重试与诊断门。监督员只读产物不采信声明，报告工程师禁Bash做物理隔离。",
+  "author": {
+    "name": "Chunkzjv"
+  }
+}

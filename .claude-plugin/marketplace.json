@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "mccl-digital-employee",
+  "description": "MCCL通信库的数字员工工具包",
+  "owner": {
+    "name": "Chunkzjv"
+  },
+  "plugins": [
+    {
+      "name": "mccl-digital-employee",
+      "description": "MCCL通信库开发验证流水线：四个子代理 + 三道监督卡点 + 分层重试与诊断门",
+      "category": "development",
+      "source": {
+        "source": "git-subdir",
+        "path": "plugins/mccl-digital-employee"
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# 输出工具包根目录（references/ 所在处）。
+#
+# 两种安装方式都要能用：
+#   1. plugin 安装：本脚本在 <plugin>/bin/ 下，且 bin/ 被加进 PATH
+#   2. 项目内拷贝：本脚本在 <repo>/bin/ 下，需显式调用
+#
+# 优先用 $CLAUDE_PLUGIN_ROOT（plugin 环境应有），但不依赖它——
+# 用 $BASH_SOURCE 反推 ../ 在两种方式下都成立，是兜底。
+set -u
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/references/mccl-safety.md" ]; then
+  echo "${CLAUDE_PLUGIN_ROOT}"
+  exit 0
+fi
+self_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -f "${self_root}/references/mccl-safety.md" ]; then
+  echo "${self_root}"
+  exit 0
+fi
+echo "mccl-toolkit-root: 找不到 references/mccl-safety.md（试过 CLAUDE_PLUGIN_ROOT=${CLAUDE_PLUGIN_ROOT:-未设置} 和 ${self_root}）" >&2
+exit 1
