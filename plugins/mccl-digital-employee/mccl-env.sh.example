@@ -7,17 +7,27 @@
 # 它只需配"本机 → NODE0"一条链路（工具包一律经NODE0跳转），
 # 并检查 NODE0 → NODE1/2/3 和容器是否可达。密码只在交互时输入一次，不存盘。
 
-# --- 四个计算节点 ---
-# NODE0 是唯一的编译节点（容器宿主）。NODE1/2/3 只接受 scp 的 libmccl.so，
+# --- 计算节点 ---
+# 节点列表，空格分隔。第一个必须是编译节点（容器宿主，即下面派生出的
+# MCCL_NODE0_IP）。除第一个之外的节点只接受 scp 的 libmccl.so，
 # 禁止在其上编译或修改源码。
-export MCCL_NODE0_IP="<node0-ip>"
-export MCCL_NODE1_IP="<node1-ip>"
-export MCCL_NODE2_IP="<node2-ip>"
-export MCCL_NODE3_IP="<node3-ip>"
+#
+# 只支持三档节点数，agent开工时会据此校验拓扑合法性：
+#   1个IP → 单节点冒烟（容器内 --mca plm isolated，不测跨节点对称内存路径）
+#   4个IP → OAM32（现有完整流程，32卡）
+#   8个IP → OAM64（同OAM32形态，-np 64）
+# 其余节点数：MCCL只硬编码了OAM32/OAM64两种拓扑，CliqueManager::IsSupported()
+# 的OAM32分支不匹配2/3/5...节点，对称内存路径不会启用，会静默fallback到
+# Ring/Tree——测出来的东西不是你以为在测的东西。agent遇到其余节点数应停止并上报。
+export MCCL_NODES="<node0-ip> <node1-ip> <node2-ip> <node3-ip>"
+export MCCL_GPUS_PER_NODE=8
 
-# mpirun 的 -host 参数，每节点8卡；总进程数
-export MCCL_HOST_SPEC="${MCCL_NODE0_IP}:8,${MCCL_NODE1_IP}:8,${MCCL_NODE2_IP}:8,${MCCL_NODE3_IP}:8"
-export MCCL_NP=32
+# 以下四个由上面两行派生，不要手改——手改成写死的值会导致这里和
+# $MCCL_NODES 对不上（tests/check.sh 不变式12会查）
+export MCCL_NODE0_IP="$(echo $MCCL_NODES | cut -d' ' -f1)"
+export MCCL_NNODES="$(echo $MCCL_NODES | wc -w)"
+export MCCL_NP="$(( MCCL_NNODES * MCCL_GPUS_PER_NODE ))"
+export MCCL_HOST_SPEC="$(for ip in $MCCL_NODES; do printf '%s:%s,' "$ip" "$MCCL_GPUS_PER_NODE"; done | sed 's/,$//')"
 
 # Node 0 上的编译容器名
 export MCCL_CONTAINER="<container-name>"
