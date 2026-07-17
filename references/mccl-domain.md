@@ -64,7 +64,9 @@
 
 `CliqueManager::IsSupportMultiNode()`不匹配OAM32/OAM64拓扑，所以`useLocalTopo = false`。这条件分支决定了`info.rank`被填成**world rank**（0..nRanks-1），而不是节点内局部rank。
 
-但`ipc_input_buffer[]`的下标是**LSA slot**（0..10，对OAM32），直接用`info.rank`索引会越界——rank 8就已经超出0..7的slot范围。修复方式是内核里改成`info.rank % GROUP`（`GROUP` = `nodeSize` = 8），取到`lsaSelf`。写涉及`ipc_input_buffer`/`ipc_output_buffer`的内核代码时，任何直接用`info.rank`当下标的地方都要检查是否需要`% GROUP`。
+但`ipc_input_buffer[]`的下标是**LSA slot**（0..10，对OAM32），直接用`info.rank`索引会越界——rank 8就已经超出0..7的slot范围。修复方式是内核里改成`info.rank % GROUP`（`GROUP` = `nodeSize` = 8），取到`lsaSelf`。
+
+由此外推的操作建议：写涉及`ipc_input_buffer`/`ipc_output_buffer`的内核代码时，任何直接用`info.rank`当下标的地方都要检查是否需要`% GROUP`——**（推断）**。`测试.md`记的是这一处具体修复，没有把它上升为"所有下标处都要查"的通则。
 
 ## 5. FC AllReduce 内核选型边界（OAM32，4节点32卡）
 
@@ -90,7 +92,7 @@
 
 - `fc0_ipc_unk_base[0..7]`和`fc1_ipc_unk_base[0..3]`来自FC clique的`ipc_unk_buffer[]`，跨节点GIN/shared memory可见性需确认（测试.md未给出结论，视为待验证项）。
 - 若FC clique跨节点共享不可达，会导致ATU地址翻译错误。
-- `sameSocketRanks`路径要求`sameSocketRankCount == nNodes`。若`peerSocketId`分布不对称（`sameSocketRankCount < nNodes`），`extLsaRankList[8..10]`尾部slot为0（calloc零初始化保证），后续`symMemoryImportAndMapSegmentsForRankOam`用0当world rank会失败。**当前OAM32/64拓扑已验证`sameSocketRankCount == nNodes`，无此问题**——但如果要支持新拓扑，这条要重新验证。
+- `sameSocketRanks`路径要求`sameSocketRankCount == nNodes`。若`peerSocketId`分布不对称（`sameSocketRankCount < nNodes`），`extLsaRankList[8..10]`尾部slot为0（calloc零初始化保证），后续`symMemoryImportAndMapSegmentsForRankOam`用0当world rank会失败。**当前OAM32/64拓扑已验证`sameSocketRankCount == nNodes`，无此问题**——但如果要支持新拓扑，这条要重新验证（"新拓扑需重验"是从上句事实外推的操作建议，**（推断）**；`测试.md`只记了当前拓扑已验证这一点）。
 
 ## 8. 临时补丁史（反面教材）
 

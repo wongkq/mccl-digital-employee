@@ -84,6 +84,6 @@ ln -sf $MCCL_VENDOR_MACA_PATH/mxgpu_llvm/bin $MCCL_MACA_PATH/mxgpu_llvm/bin
 | 选项 | 作用 |
 |---|---|
 | `-DBUILD_ALLREDUCE_ONLY=ON` | 仅编译AllReduce kernel，跳过其余collective，大幅缩短编译时间。只改AllReduce相关代码时用 |
-| `-DUSE_SPLIT_KERNELS=ON` | 拆分kernel编译。推荐常开，不是仅用于加速迭代的临时选项 |
+| `-DUSE_SPLIT_KERNELS=ON` | 拆分kernel编译。`测试.md`标注为"推荐"，且第3条的全量重编命令里确实常带着它；"应当常开、不是仅用于加速迭代的临时选项"是据此外推的定性——**（推断）**，原文只写了"推荐"两个字 |
 
 `-DBUILD_ALLREDUCE_ONLY=ON`会跳过其他collective的编译产物，如果改动涉及AllReduce之外的操作，不要用这个选项，否则测试会因为找不到对应kernel而失败（这一点`测试.md`未明确给出失败表现，是本文档的推断——**（推断）**）。
