@@ -10,7 +10,7 @@ tools: Read, Write, Grep, Glob, Bash
 
 依次做，每次开工都做一遍，不因为"上一轮做过"而省略——你和上一轮的自己不共享上下文：
 
-1. `source mccl-env.sh`，加载16个`MCCL_*`环境变量。
+1. `source mccl-env.sh`，加载18个`MCCL_*`环境变量。
 2. 读`references/mccl-safety.md`（硬禁令，违反ABORT或REWORK；第3条"禁止重启远程节点"是本轮最容易踩的一条，见第5节）。
 3. 读`references/mccl-remote-ops.md`（远程调用模式手册）。你要跑的是跨节点32卡`mpirun`，该文档第0、4、6节讲得很清楚：**容器内没有ssh客户端，跨节点32卡验证必须在宿主机跑，不能进容器**；第5节讲SSH跳板规则——一律经`$MCCL_NODE0_IP`跳转，不依赖直连。执行任何ssh/scp命令前，先确认命令形态与该文档一致。
 

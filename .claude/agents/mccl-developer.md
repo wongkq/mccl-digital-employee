@@ -10,7 +10,7 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 
 依次做：
 
-1. `source mccl-env.sh`，加载16个`MCCL_*`环境变量。
+1. `source mccl-env.sh`，加载18个`MCCL_*`环境变量。
 2. 读`references/mccl-safety.md`（硬禁令，8条，违反ABORT或REWORK）。
 3. 读`references/mccl-build-pitfalls.md`（编译陷阱，尤其第2条macaify增量编译坑）。
 4. 读`references/mccl-remote-ops.md`（远程调用模式：ssh+docker exec引号嵌套、`/opt/maca/lib`双重身份、4节点分发方式差异）。执行任何ssh/rsync/docker exec/scp命令前，先确认命令形态与该文档一致，不要凭感觉拼引号。

@@ -35,11 +35,13 @@ cp <本仓库>/.claude/agents/*.md    .claude/agents/
 cp <本仓库>/.claude/commands/*.md  .claude/commands/
 cp -r <本仓库>/references          .    # 含 supervisor-checklists/ 子目录，-r 会带上
 cp <本仓库>/mccl-env.sh.example    ./mccl-env.sh
-# 编辑 mccl-env.sh，填入真实的节点IP、路径、容器名等16个变量的真实值
+# 编辑 mccl-env.sh，填入真实的节点IP、路径、容器名等18个变量的真实值
 
 # 合并（不要覆盖）真实仓库已有的 .claude/settings.json：
 #   把本仓库 .claude/settings.json 里 permissions.deny 的5条规则
 #   （git push / reboot / shutdown / halt / init）追加进真实仓库现有的 deny 列表
+#   注意：check.sh 只校验其中3条（git push / reboot / shutdown），halt / init
+#   漏掉了也不会报错，合并时自己对一遍
 
 # 追加到真实仓库的 .gitignore（若已有类似条目则跳过）：
 #   .mccl-runs/
@@ -111,7 +113,7 @@ references/
 ├── mccl-remote-ops.md            远程调用模式手册（ssh跳板、docker exec引号嵌套、4节点分发差异）
 └── supervisor-checklists/
     ├── dev.md      test.md      report.md      三道卡点各自的监督checklist
-mccl-env.sh.example    16个MCCL_*环境变量模板
+mccl-env.sh.example    18个MCCL_*环境变量模板
 tests/check.sh          10条静态不变式自检
 ```
 
@@ -127,4 +129,16 @@ tests/check.sh          10条静态不变式自检
 
 ## `测试.md`不入库
 
-`测试.md`是私有参考资料（真实环境的调试记录、内网IP、主机映射等），永远不进入本仓库的git历史，已在`.gitignore`中拦截。`references/`下的四份领域知识文档是从`测试.md`提炼出的技术知识（编译陷阱、硬禁令、远程调用模式、对称内存等领域概念），**不含**具体IP、主机名映射、真实文件系统路径——这些环境相关的具体值统一收敛到`mccl-env.sh`（不入库，只提交`mccl-env.sh.example`模板）。`tests/check.sh`的不变式1-4专门校验这条边界没有被破坏。
+`测试.md`是私有参考资料（真实环境的调试记录、内网IP、主机映射等），永远不进入本仓库的git历史，已在`.gitignore`中拦截。`references/`下的四份领域知识文档是从`测试.md`提炼出的技术知识（编译陷阱、硬禁令、远程调用模式、对称内存等领域概念），环境相关的具体值统一收敛到`mccl-env.sh`（不入库，只提交`mccl-env.sh.example`模板）。
+
+**这条边界只有一部分是自动校验的，其余靠人工把关**——说清楚哪部分是哪部分，比笼统说"已校验"有用：
+
+| | 谁来把关 |
+|---|---|
+| 内网IP字面量 | `tests/check.sh`不变式3自动校验（已跟踪文件grep私网IP段） |
+| `测试.md`本身不入库 | 不变式1（不在git历史）、不变式2（被`.gitignore`拦截）自动校验 |
+| `mccl-env.sh`不入库 | 不变式4自动校验 |
+| 主机名/末位八位组映射（如`Host3=<末位八位组>`） | **无自动校验**，靠review。写进已跟踪文件，`check.sh`照样全绿 |
+| 真实文件系统路径 | **无自动校验**，且`references/`里**确实含**真实路径 |
+
+关于最后一行：`references/`里出现`/opt/maca`这类厂商标准安装路径是**有意保留**的说明性上下文——不写清楚"`/opt/maca`是什么、为什么不能拿它编译"，`mccl-build-pitfalls.md`第1条就讲不成。规则是`mccl-remote-ops.md:5`和`mccl-build-pitfalls.md:5`各自声明的那条：**agent实际要执行的路径一律走`$MCCL_*`变量，字面路径只能出现在解释性文字里**。这比"不含真实文件系统路径"要宽，以这两份文档自己的声明为准。
