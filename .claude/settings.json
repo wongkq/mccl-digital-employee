@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(reboot:*)",
+      "Bash(shutdown:*)",
+      "Bash(halt:*)",
+      "Bash(init:*)"
+    ]
+  }
+}

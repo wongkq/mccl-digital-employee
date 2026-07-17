@@ -39,6 +39,26 @@ else
   ok "mccl-env.sh 未被跟踪"
 fi
 
+# --- 5. settings.json 合法且含关键 deny 规则 ---
+if [ ! -f .claude/settings.json ]; then
+  err ".claude/settings.json 缺失"
+elif ! python3 -c 'import json,sys; json.load(open(".claude/settings.json"))' 2>/dev/null; then
+  err ".claude/settings.json 不是合法JSON"
+else
+  missing=$(python3 - <<'PY'
+import json
+need = {"Bash(git push:*)", "Bash(reboot:*)", "Bash(shutdown:*)"}
+have = set(json.load(open(".claude/settings.json")).get("permissions", {}).get("deny", []))
+print(" ".join(sorted(need - have)))
+PY
+)
+  if [ -n "$missing" ]; then
+    err "settings.json 缺少 deny 规则：$missing"
+  else
+    ok "settings.json 合法且含关键 deny 规则"
+  fi
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"
