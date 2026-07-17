@@ -44,12 +44,20 @@ description: 跑一轮完整的MCCL开发验证流水线：开发→监督→测
 
 ## 2. 开工前
 
-0. **先锚定仓库根**：`REPO_ROOT="$(git rev-parse --show-toplevel)"`。你继承的是用户启动Claude Code时的工作目录，**不一定是仓库根**。`git rev-parse`失败就停止并提示"请在MCCL仓库内运行"。下面所有路径都基于`$REPO_ROOT`。
+0. **先锚定两个根**：
 
-1. 检查`$REPO_ROOT/mccl-env.sh`是否存在。**不存在则停止**，提示用户：`mccl-env.sh 不存在，请先 cp mccl-env.sh.example mccl-env.sh 并填入真实值后再运行 /mccl-run`。不得跳过这一步继续往下走。
+```bash
+REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT"
+```
+
+你继承的是用户启动Claude Code时的工作目录，**不一定是仓库根**。`git rev-parse`失败就停止并提示"请在MCCL仓库内运行"。
+
+1. 检查`$REPO_ROOT/mccl-env.sh`是否存在。**不存在则停止**，提示用户：`mccl-env.sh 不存在，请先 cp mccl-env.sh.example mccl-env.sh 并填入真实值后再运行 /mccl-run`。不得跳过这一步继续往下走。存在则`source "$REPO_ROOT/mccl-env.sh"`。
+
+   接着解析`TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"`，并确认`$TOOLKIT_ROOT/references/mccl-safety.md`存在——四个子代理各自开工时都要独立解析这同一个`TOOLKIT_ROOT`并读取`references/`，此处提前校验一次是为了在拉起任何子代理之前就快速失败，不必等到developer子代理内部才发现装错了位置。这两个根不能混用：`TOOLKIT_ROOT`下是`references/`，`REPO_ROOT`下是`mccl-env.sh`、MCCL源码、`.mccl-runs/`。
 
    run目录用绝对路径：`RUN_DIR="$REPO_ROOT/.mccl-runs/$(date +%Y-%m-%d-%H%M)"`。**你传给每个子代理的路径必须是绝对路径**——子代理和你一样继承主会话CWD，给相对路径它们会解析到别处去。
-2. `RUN_DIR=.mccl-runs/$(date +%Y-%m-%d-%H%M)/`，`mkdir -p "$RUN_DIR"`。
+2. `mkdir -p "$RUN_DIR"`。
 3. 初始化`$RUN_DIR/timeline.md`，写入首行：任务描述原文、开始时间。
 4. 设`attempt=1`。进入第3节的编排循环。
 
