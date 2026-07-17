@@ -97,6 +97,24 @@ else
   ok "mccl-reporter 无 Bash"
 fi
 
+# --- 9. 编排命令引用的 agent 均已定义 ---
+cf=".claude/commands/mccl-run.md"
+if [ ! -f "$cf" ]; then
+  err "$cf 缺失"
+else
+  for a in mccl-developer mccl-tester mccl-reporter mccl-supervisor; do
+    grep -q "$a" "$cf" || err "$cf 未引用 agent: $a"
+    [ -f ".claude/agents/$a.md" ] || err "agent 定义缺失: .claude/agents/$a.md"
+  done
+  ok "编排命令引用的 agent 均已定义"
+fi
+
+# --- 10. checklist 三份齐全 ---
+for s in dev test report; do
+  [ -f "references/supervisor-checklists/$s.md" ] || err "checklist 缺失: $s.md"
+done
+ok "supervisor checklist 齐全"
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"
