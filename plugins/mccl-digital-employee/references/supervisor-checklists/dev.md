@@ -20,9 +20,9 @@ stage=dev时使用。产物来源：`change.patch`、`dev-change.md`、`build.lo
 
 怎么查：`build.log`、`dev-change.md`全文grep`git push`、`git commit`关键字；有条件时，用Bash在本地仓库跑`git log --oneline -5`，核对没有出现开发子代理本轮新增的commit（对照任务开始前的HEAD，若不确定基线，至少确认当前HEAD与`change.patch`描述的"未提交改动"状态吻合，即改动仍是working tree里的diff而非已提交的commit）。
 
-## 5. 是否在NODE1/2/3上编译或改源码 → **ABORT**
+## 5. 是否在编译节点之外的节点上编译或改源码 → **ABORT**
 
-怎么查：`build.log`中grep`$MCCL_NODE1_IP`/`$MCCL_NODE2_IP`/`$MCCL_NODE3_IP`（或`mccl-env.sh`里对应的IP值），确认这三个IP只出现在分发（scp/cp目标）上下文里，不出现在`make`、`docker exec ... bash -c`编译命令的上下文里。
+怎么查：读`mccl-env.sh`（或run目录里能核实到的`$MCCL_NODES`值），取除第一个（编译节点，`$MCCL_NODE0_IP`）之外的每个IP，在`build.log`中grep这些IP，确认它们只出现在分发（scp/cp目标）上下文里，不出现在`make`、`docker exec ... bash -c`编译命令的上下文里。
 
 ## 6. `build.log`中`MACA_PATH`是否为`$MCCL_MACA_PATH` → 否则REWORK
 
@@ -67,14 +67,28 @@ stage=dev时使用。产物来源：`change.patch`、`dev-change.md`、`build.lo
 
 仅在本轮`轮次`＝3时执行。怎么查：读本轮`dev-change.md`的"## 根因假设"字段，与前两轮的`dev-change.md`"## 根因假设"字段（历史存放方式见`.claude/agents/mccl-supervisor.md`第2节第4点；找不到历史产物按证据不足处理，判REWORK而非放行，不得因查不到就默认PASS）逐句比对实质内容——不是比对措辞，是比对"认定问题出在哪"这件事本身。若第3轮假设与第1轮或第2轮实质相同（只是换了说法），或第3轮改动本身属于绕过性质（见第9条）而非真正定位根因，判ABORT，不再给第4轮机会。理由：连续两轮同一假设不成立，说明诊断方法本身有问题，不该再用同一思路修第三次。
 
-## 11. `libmccl.so`是否已分发到4节点 → 否则REWORK
+## 11. `libmccl.so`是否已分发到全部节点 → 否则REWORK
 
-怎么查：`dev-change.md`"编译结果"字段必须列出**五个**具体md5值——构建产物本身（`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`）＋四个节点（**含Node 0**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（即`$MCCL_LD_LIBRARY_PATH`的库目录部分，**不是容器内`/opt/maca/lib`那份**，两者同名不同层，见`references/mccl-remote-ops.md`第2节）。五个值必须完全一致。
+怎么查：先核实`$MCCL_NNODES`的值（读`mccl-env.sh`或run目录里能核实到的值）。`dev-change.md`"编译结果"字段必须列出对应份数的具体md5值：
 
-Node 0是最容易出问题的一个：它既是编译节点又要被分发，产物在`build/`而不在`$MCCL_MACA_LIB_DIR`，需要一次单独的容器内`cp`（`references/mccl-remote-ops.md`第3节动作②）才会到位。若五个值里对不上的恰好是Node 0那一份，八成是这一步被漏了。
+- 多节点模式（`$MCCL_NNODES=4`或`8`）：**`$MCCL_NNODES + 1`个**——构建产物本身（`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`）＋`$MCCL_NNODES`个节点（**含编译节点**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（即`$MCCL_LD_LIBRARY_PATH`的库目录部分，**不是容器内`$MCCL_VENDOR_MACA_PATH/lib`那份**，两者同名不同层，见`references/mccl-remote-ops.md`第2节）。
+- 单节点模式（`$MCCL_NNODES=1`）：**2个**——构建产物本身 ＋ 容器内`$MCCL_VENDOR_MACA_PATH/lib/libmccl.so`（第3节动作①产生）。单节点模式不要求`$MCCL_MACA_LIB_DIR`那份，那是给跨节点宿主机mpirun用的，本模式用不上，不得因为"只列了2个"就判REWORK。
 
-笼统写"已分发"、"已同步"这类无法核实的表述，判REWORK。列了但五个值不全一致，说明分发没真正生效，判REWORK。
+对应份数的md5值必须完全一致。
 
-有Bash执行条件时，经`$MCCL_NODE0_IP`跳板抽查`md5sum`核实自报值属实（跳板/引号写法见`references/mccl-remote-ops.md`第1、5节）。不具备执行条件时，至少要求五个值齐全且一致。
+编译节点是多节点模式下最容易出问题的一个：它既是编译节点又要被分发，产物在`build/`而不在`$MCCL_MACA_LIB_DIR`，需要一次单独的容器内`cp`（`references/mccl-remote-ops.md`第3节动作②）才会到位。若对不上的恰好是编译节点那一份，八成是这一步被漏了。
 
-注：测试agent会在开跑前**独立重算**这五个md5、不采信开发自报值，这是设计好的交叉验证。你这一关查的是"有没有如实列出"，测试那一关查的是"列的是不是真的"。
+笼统写"已分发"、"已同步"这类无法核实的表述，判REWORK。列了但值不全一致，说明分发没真正生效，判REWORK。份数与`$MCCL_NNODES`推算出的预期不符（多了或少了），同样判REWORK。
+
+有Bash执行条件时，经`$MCCL_NODE0_IP`跳板抽查`md5sum`核实自报值属实（跳板/引号写法见`references/mccl-remote-ops.md`第1、5节）。不具备执行条件时，至少要求份数与`$MCCL_NNODES`对应、且全部一致。
+
+注：测试agent会在开跑前**独立重算**这些md5、不采信开发自报值，这是设计好的交叉验证。你这一关查的是"有没有如实列出"，测试那一关查的是"列的是不是真的"。
+
+## 12. 拓扑合法性：`$MCCL_NNODES`不是1/4/8时，是否停止并上报 → 否则**ABORT**
+
+怎么查：核实`$MCCL_NNODES`的值（读`mccl-env.sh`或run目录里能核实到的值）。若值不是1、4、8三者之一：
+
+- 检查`change.patch`是否为空、`build.log`是否不存在或不含实际编译记录、`dev-change.md`是否记录了"`$MCCL_NNODES`不支持，已上报"这类内容而非正常的七字段交付。
+- 若开发子代理在拓扑不支持的情况下仍然改了代码、编译、分发了`libmccl.so`，视为闷头跑了不该跑的流程——**直接ABORT**，不给REWORK的机会。理由：MCCL只硬编码OAM32/OAM64两种拓扑，`$MCCL_NNODES`为2/3/5等值时对称内存路径不会启用、会静默fallback到Ring/Tree，在这种拓扑下产出的编译与分发结果，后续测试验证不到真正要验证的路径——闷头跑完比停下上报更有害，因为会产生一份看起来正常的交付。
+
+`$MCCL_NNODES`为1、4、8时，本条不触发，按其余各条正常审计（单节点模式下第11条走2份md5的分支，见上）。
