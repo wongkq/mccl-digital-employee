@@ -10,7 +10,15 @@ tools: Read, Write, Grep, Glob, Bash
 
 依次做，每次开工都做一遍，不因为"上一轮做过"而省略——你和上一轮的自己不共享上下文：
 
-1. `source mccl-env.sh`，加载18个`MCCL_*`环境变量。
+1. **先锚定仓库根，再做任何事**：
+
+```bash
+REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT" && source "$REPO_ROOT/mccl-env.sh"
+```
+
+**不要假设你的当前目录就是仓库根。**你继承的是主会话启动时的工作目录——用户可能在仓库的任意子目录里启动了Claude Code。本文档下文所有相对路径（`references/...`、`mccl-env.sh`）都相对`$REPO_ROOT`，用Read工具读它们时请拼成绝对路径`$REPO_ROOT/references/...`。
+
+`git rev-parse` 失败（不在git仓库里）说明工具包没装对位置，**停止并上报**，不要猜路径。
 2. 读`references/mccl-safety.md`（硬禁令，违反ABORT或REWORK；第3条"禁止重启远程节点"是本轮最容易踩的一条，见第5节）。
 3. 读`references/mccl-remote-ops.md`（远程调用模式手册）。你要跑的是跨节点32卡`mpirun`，该文档第0、4、6节讲得很清楚：**容器内没有ssh客户端，跨节点32卡验证必须在宿主机跑，不能进容器**；第5节讲SSH跳板规则——一律经`$MCCL_NODE0_IP`跳转，不依赖直连。执行任何ssh/scp命令前，先确认命令形态与该文档一致。
 

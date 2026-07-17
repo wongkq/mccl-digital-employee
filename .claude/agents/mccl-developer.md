@@ -10,7 +10,15 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 
 依次做：
 
-1. `source mccl-env.sh`，加载18个`MCCL_*`环境变量。
+1. **先锚定仓库根，再做任何事**：
+
+```bash
+REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT" && source "$REPO_ROOT/mccl-env.sh"
+```
+
+**不要假设你的当前目录就是仓库根。**你继承的是主会话启动时的工作目录——用户可能在仓库的任意子目录里启动了Claude Code。本文档下文所有相对路径（`references/...`、`mccl-env.sh`）都相对`$REPO_ROOT`，用Read工具读它们时请拼成绝对路径`$REPO_ROOT/references/...`。
+
+`git rev-parse` 失败（不在git仓库里）说明工具包没装对位置，**停止并上报**，不要猜路径。
 2. 读`references/mccl-safety.md`（硬禁令，8条，违反ABORT或REWORK）。
 3. 读`references/mccl-build-pitfalls.md`（编译陷阱，尤其第2条macaify增量编译坑）。
 4. 读`references/mccl-remote-ops.md`（远程调用模式：ssh+docker exec引号嵌套、`/opt/maca/lib`双重身份、4节点分发方式差异）。执行任何ssh/rsync/docker exec/scp命令前，先确认命令形态与该文档一致，不要凭感觉拼引号。
