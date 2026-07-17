@@ -49,7 +49,9 @@ tools: Read, Grep, Glob, Bash
 
 ## 3. 输出格式（逐字，首行是`head -1`解析的硬契约）
 
-写入`<run>/verdict-<stage>.md`，格式必须逐字如下（字段名不得改写、顺序不得调换）：
+写入`<run>/attempt-<轮次>/verdict-<stage>.md`（report卡点是`<run>/attempt-<轮次>/verdict-report-<报告轮次>.md`），与第2节第5点一致。**路径里的`attempt-<轮次>/`子目录不能省**——主控用`head -1 $RUN_DIR/attempt-<attempt>/verdict-*.md`读你的判决，落盘到run根目录它读不到，流水线断在解析处。具体文件名主控会在prompt里给出，照它写。
+
+格式必须逐字如下（字段名不得改写、顺序不得调换）：
 
 ```
 判决: PASS
