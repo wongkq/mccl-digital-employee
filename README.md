@@ -160,6 +160,8 @@ export MCCL_GPUS_PER_NODE=8
 
 主控会检查`mccl-env.sh`是否存在（不存在则停止并提示），然后创建`.mccl-runs/<YYYY-MM-DD-HHMM>/`，按下方流程调度四个子代理，直到全绿产出`final-report.md`，或触发升级写出`escalation.md`。**全绿之后不自动commit、不自动push、不自动归档到`docs/reports/`**——是否commit、commit信息怎么写，一律由人工确认后自己执行。
 
+单独调用某个子代理、怎么读产物、出问题怎么排查，见`plugins/mccl-digital-employee/USAGE.md`。
+
 ### run目录布局
 
 ```
