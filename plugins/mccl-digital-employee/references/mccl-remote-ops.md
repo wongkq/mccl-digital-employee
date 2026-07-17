@@ -23,6 +23,30 @@ Bash 调用背后没有人，它就一直挂在那里直到超时。带上 Batch
 **卡死比失败更糟**：失败会被上报、被监督员看到、被你修；卡死只是让流水线停在那里，
 没有任何产物、没有任何 verdict，你要等到超时才知道出了事。
 
+## 0.6 远程命令的输出必须落到**本地** run 目录（决定报告工程师有没有饭吃）
+
+```bash
+# 对：重定向在 ssh 外面，输出流回本地，落进 run 目录
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<远程命令>" > "$RUN_DIR/build.log" 2>&1
+
+# 错：重定向在引号里面，日志留在远程主机上，本地 run 目录里什么都没有
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<远程命令> > build.log 2>&1"
+```
+
+**为什么这条是硬要求**：`mccl-reporter` 没有 Bash（防报告造假的物理隔离），它**没有任何
+办法**去远程主机取文件——它只能用 Read 工具读本地 run 目录。日志落在远程，对报告工程师
+而言等同于不存在，它只能按规矩写"缺失"，然后监督员判 REWORK，这一轮白跑。
+
+同理 `mccl-supervisor` 虽然有 Bash，但它审的是产物、走的是 Read；日志不在本地，它也只能
+按"证据不足"判 REWORK。
+
+**规则：`ssh`/`docker exec` 只负责"在远端执行"，不负责"在远端存储"。所有输出一律流回本地。**
+后台发起时同理：
+
+```bash
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<mpirun 命令>" > "$RUN_DIR/test-asymmetric.log" 2>&1 &
+```
+
 ## 1. `ssh` + `docker exec` 引号嵌套模板（最容易猜错的地方）
 
 标准形态：

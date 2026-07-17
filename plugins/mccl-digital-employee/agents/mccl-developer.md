@@ -163,4 +163,16 @@ git diff > <run目录>/change.patch
 
 ## 8. 产出 `build.log`
 
+**重定向必须在 `ssh` 外面，日志落到本地 run 目录**（见`$TOOLKIT_ROOT/references/mccl-remote-ops.md` §0.6）：
+
+```bash
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c '...make -j50'" \
+  > "<run目录>/build.log" 2>&1
+```
+
+写成 `ssh ... "make ... > build.log"` 就错了——日志留在NODE0上，本地run目录里什么都没有。
+`mccl-reporter`没有Bash取不了远程文件，`mccl-supervisor`审不到证据只能判REWORK，这一轮白跑。
+
+
+
 完整原始编译日志，从`make`开始到结束的全部输出，不摘要、不裁剪、不只保留报错部分。监督员和后续排查都依赖这份完整记录——摘要会丢掉排查所需的上下文。
