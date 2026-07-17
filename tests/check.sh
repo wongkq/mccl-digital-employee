@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# MCCL数字员工工具包自检。每次commit前跑：bash tests/check.sh
+# 只验证静态不变式。agent的实际行为需拷入真实仓库后验证。
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+fail=0
+err() { echo "FAIL: $*" >&2; fail=1; }
+ok()  { echo "ok:   $*"; }
+
+# --- 1. 测试.md 从未进入 git 历史 ---
+if git log --all --pretty=format: --name-only 2>/dev/null | grep -qx '测试.md'; then
+  err "测试.md 出现在 git 历史中（不可逆，需 filter-branch 清理）"
+else
+  ok "测试.md 不在 git 历史中"
+fi
+
+# --- 2. 测试.md 当前被忽略 ---
+if git check-ignore -q 测试.md 2>/dev/null; then
+  ok "测试.md 被 .gitignore 拦截"
+elif [ -e 测试.md ]; then
+  err "测试.md 存在但未被忽略"
+else
+  ok "测试.md 不存在于工作区"
+fi
+
+# --- 3. 已跟踪文件不得含私网IP字面量 ---
+ip_hits=$(git ls-files -z | xargs -0 grep -lE '\b(10\.[0-9]{1,3}|192\.168|172\.(1[6-9]|2[0-9]|3[01]))\.[0-9]{1,3}\.[0-9]{1,3}\b' 2>/dev/null || true)
+if [ -n "$ip_hits" ]; then
+  err "已跟踪文件含私网IP：$ip_hits"
+else
+  ok "已跟踪文件无私网IP字面量"
+fi
+
+# --- 4. mccl-env.sh 不得被跟踪 ---
+if git ls-files --error-unmatch mccl-env.sh >/dev/null 2>&1; then
+  err "mccl-env.sh 被跟踪（含内网信息，应只提交 .example）"
+else
+  ok "mccl-env.sh 未被跟踪"
+fi
+
+echo
+[ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
+exit "$fail"

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# 拷贝为 mccl-env.sh 并填入真实值。mccl-env.sh 不入库（见 .gitignore）。
+# 所有 agent 从此文件取环境值，不得硬编码。
+
+# --- 四个计算节点 ---
+# NODE0 是唯一的编译节点（容器宿主）。NODE1/2/3 只接受 scp 的 libmccl.so，
+# 禁止在其上编译或修改源码。
+export MCCL_NODE0_IP="<node0-ip>"
+export MCCL_NODE1_IP="<node1-ip>"
+export MCCL_NODE2_IP="<node2-ip>"
+export MCCL_NODE3_IP="<node3-ip>"
+
+# mpirun 的 -host 参数，每节点8卡；总进程数
+export MCCL_HOST_SPEC="${MCCL_NODE0_IP}:8,${MCCL_NODE1_IP}:8,${MCCL_NODE2_IP}:8,${MCCL_NODE3_IP}:8"
+export MCCL_NP=32
+
+# Node 0 上的编译容器名
+export MCCL_CONTAINER="<container-name>"
+
+# --- 编译 ---
+# 必须指向含正确 mcMemFabricHandle_t 定义的 MACA 安装。另一个常见路径下的定义
+# 是旧版 stub，结构体尺寸不同，会导致跨节点对称内存句柄异常。
+# 详见 references/mccl-build-pitfalls.md
+export MCCL_MACA_PATH="<maca-path>"
+export MCCL_LOCAL_SRC="<local-repo-path>"
+export MCCL_REMOTE_SRC="<remote-src-path>"
+
+# agent 在远程的可写范围边界。此目录之外一律禁止修改。
+export MCCL_REMOTE_WORKDIR="<remote-workdir>"
+
+# --- 测试 ---
+export MCCL_MPIRUN="<mpirun-path>"
+export MCCL_PERF_BIN_ASYM="<asymmetric-perf-binary>"  # 场景A：不带 -R
+export MCCL_PERF_BIN_SYM="<symmetric-perf-binary>"    # 场景B：带 -R 2
+export MCCL_LD_LIBRARY_PATH="<lib-path>:<ompi-lib-path>"
+export MCCL_TCP_IF_INCLUDE="<cidr>"
