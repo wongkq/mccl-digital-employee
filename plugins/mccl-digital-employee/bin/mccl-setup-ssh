@@ -18,10 +18,22 @@ ENV_FILE="$REPO_ROOT/mccl-env.sh"
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 
-: "${MCCL_NODE0_IP:?mccl-env.sh 里缺 MCCL_NODE0_IP}"
-: "${MCCL_NODE1_IP:?mccl-env.sh 里缺 MCCL_NODE1_IP}"
-: "${MCCL_NODE2_IP:?mccl-env.sh 里缺 MCCL_NODE2_IP}"
-: "${MCCL_NODE3_IP:?mccl-env.sh 里缺 MCCL_NODE3_IP}"
+: "${MCCL_NODES:?mccl-env.sh 里缺 MCCL_NODES}"
+: "${MCCL_NODE0_IP:?mccl-env.sh 里缺 MCCL_NODE0_IP（应由 MCCL_NODES 派生）}"
+: "${MCCL_NNODES:?mccl-env.sh 里缺 MCCL_NNODES（应由 MCCL_NODES 派生）}"
+
+# 除编译节点外的其余节点（单节点时为空）
+PEERS="$(echo "$MCCL_NODES" | cut -d' ' -f2-)"
+[ "$PEERS" = "$MCCL_NODES" ] && PEERS=""   # 只有一个节点时 cut -f2- 会原样返回
+
+echo "拓扑：$MCCL_NNODES 个节点，编译节点 $MCCL_NODE0_IP"
+case "$MCCL_NNODES" in
+  1) echo "     单节点模式——跨节点链路无需配置，跳过第2步" ;;
+  4|8) : ;;
+  *) echo "     警告：MCCL 只硬编码了 OAM32(4节点) 和 OAM64(8节点) 两种拓扑。" >&2
+     echo "     $MCCL_NNODES 节点不是受支持的拓扑，对称内存路径不会启用。" >&2
+     echo "     SSH 链路仍会照配，但跑测试时 agent 会拒绝执行。" >&2 ;;
+esac
 
 SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new"
 fail=0
@@ -41,7 +53,7 @@ else
     *)
       echo "   连不上 $MCCL_NODE0_IP，不是密钥的问题：" >&2
       echo "     $probe" >&2
-      echo "   先确认IP对不对（mccl-env.sh 第8行）、网络通不通、SSH服务在不在。" >&2
+      echo "   先确认IP对不对（mccl-env.sh 的 MCCL_NODES）、网络通不通、SSH服务在不在。" >&2
       echo "   主机都不可达时配密钥没有意义，这里直接停，不进入密码提示。" >&2
       exit 1 ;;
   esac
@@ -57,16 +69,19 @@ else
     && echo "   配置成功" || { echo "   配置后仍不通" >&2; exit 1; }
 fi
 
-echo "== 2. Node 0 → Node 1/2/3 免密（工具包依赖，本机配不了，只检查）=="
-for n in 1 2 3; do
-  eval "ip=\$MCCL_NODE${n}_IP"
-  if ssh $SSH_OPTS "root@$MCCL_NODE0_IP" "ssh $SSH_OPTS root@$ip true" 2>/dev/null; then
-    echo "   Node 0 → Node $n ($ip)  通"
-  else
-    echo "   Node 0 → Node $n ($ip)  不通 ← 分发libmccl.so和跨节点mpirun都会失败" >&2
-    fail=1
-  fi
-done
+if [ -z "$PEERS" ]; then
+  echo "== 2. 跨节点免密：单节点拓扑，无需检查 =="
+else
+  echo "== 2. 编译节点 → 其余节点免密（工具包依赖，本机配不了，只检查）=="
+  for ip in $PEERS; do
+    if ssh $SSH_OPTS "root@$MCCL_NODE0_IP" "ssh $SSH_OPTS root@$ip true" 2>/dev/null; then
+      echo "   $MCCL_NODE0_IP → $ip  通"
+    else
+      echo "   $MCCL_NODE0_IP → $ip  不通 ← 分发libmccl.so和跨节点mpirun都会失败" >&2
+      fail=1
+    fi
+  done
+fi
 
 echo "== 3. 容器 ($MCCL_CONTAINER) 可达 =="
 if ssh $SSH_OPTS "root@$MCCL_NODE0_IP" "docker exec $MCCL_CONTAINER true" 2>/dev/null; then
