@@ -86,7 +86,7 @@ bash <本仓库>/tests/check.sh
 
 | 循环 | 计数变量 | 上限 | 谁递增 | 递增后落到哪 |
 |---|---|---|---|---|
-| 编译内循环 | 不单独计数 | 5轮 | `mccl-developer`内部，不体现在`attempt`上 | 只保留最终态的一份`change.patch`/`dev-change.md`/`build.log` |
+| 编译内循环 | 不单独计数 | 5轮 | `mccl-developer`内部，不体现在`attempt`上 | 只保留最终态的一份`change.patch`/`dev-change.md`/`build.log`；每轮的报错摘要逐轮记在`dev-change.md`的"编译结果"字段——`build.log`只有最终一次`make`的输出，佐证不了轮次，监督员数的是那份逐轮记录 |
 | 改代码→上32卡完整闭环 | `attempt` | 3轮 | 只有`mccl-supervisor(stage=dev)`或`stage=test`判**REWORK**时 | 新的`attempt-N/`子目录 |
 | 报告内循环 | `report_attempt` | 2轮 | `mccl-supervisor(stage=report)`判**REWORK**时（不递增`attempt`） | 同一`attempt-N/`目录下新的`report-M.md` |
 
