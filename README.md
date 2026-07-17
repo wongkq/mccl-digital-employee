@@ -218,7 +218,7 @@ plugins/mccl-digital-employee/
 │   └── supervisor-checklists/
 │       ├── dev.md      test.md      report.md      三道卡点各自的监督checklist
 ├── mccl-env.sh.example    18个MCCL_*环境变量模板
-└── tests/check.sh          11条静态不变式自检（仓库级+插件级）
+└── tests/check.sh          13条静态不变式自检（仓库级+插件级）
 docs/superpowers/{specs,plans}/      设计与实施计划
 ```
 
