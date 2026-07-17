@@ -59,6 +59,34 @@ PY
   fi
 fi
 
+# --- 6. agent frontmatter 完整 ---
+for f in .claude/agents/*.md; do
+  [ -e "$f" ] || continue
+  for field in name description tools; do
+    if ! awk '/^---$/{n++; next} n==1' "$f" | grep -q "^${field}:"; then
+      # tools 缺失合法（= 全部工具），仅 name/description 必需
+      [ "$field" = "tools" ] && continue
+      err "$f 的 frontmatter 缺 $field"
+    fi
+  done
+  fm_name=$(awk '/^---$/{n++; next} n==1' "$f" | sed -n 's/^name: *//p')
+  base=$(basename "$f" .md)
+  [ "$fm_name" = "$base" ] || err "$f 的 name($fm_name) 与文件名($base) 不一致"
+done
+ok "agent frontmatter 检查完成"
+
+# --- 7. agent 引用的 MCCL_ 变量都在 mccl-env.sh.example 中定义 ---
+undef=""
+for v in $(grep -rhoE '\$\{?MCCL_[A-Z0-9_]+' .claude/ references/ 2>/dev/null \
+           | sed 's/[${]//g' | sort -u); do
+  grep -q "^export ${v}=" mccl-env.sh.example || undef="$undef $v"
+done
+if [ -n "$undef" ]; then
+  err "引用了未在 mccl-env.sh.example 中定义的变量：$undef"
+else
+  ok "环境变量引用闭合"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"
