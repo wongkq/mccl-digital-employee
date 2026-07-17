@@ -30,6 +30,11 @@ export MCCL_NP="$(( MCCL_NNODES * MCCL_GPUS_PER_NODE ))"
 export MCCL_HOST_SPEC="$(for ip in $MCCL_NODES; do printf '%s:%s,' "$ip" "$MCCL_GPUS_PER_NODE"; done | sed 's/,$//')"
 
 # Node 0 上的编译容器名
+# 所有 ssh/scp 必须带这组选项。BatchMode=yes 让"密钥没配好"变成立刻失败而不是
+# 弹密码提示——agent 的 Bash 调用等不到人输密码，弹提示等于卡死。
+# 密钥没配好时应该跑 bin/mccl-setup-ssh，不是让 agent 挂在那里。
+export MCCL_SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
+
 export MCCL_CONTAINER="<container-name>"
 
 # --- 编译 ---

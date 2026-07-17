@@ -171,6 +171,17 @@ else
   fi
 fi
 
+# --- 13. ssh/scp 必须带 $MCCL_SSH_OPTS（裸 ssh 在密钥没配好时会弹密码提示，
+#         而 agent 的 Bash 背后没有人输密码，等于卡死）---
+bare="$(grep -rn 'ssh root@\|scp [^$]*root@' "$PLUGIN_ROOT/agents/" "$PLUGIN_ROOT/commands/" \
+        "$PLUGIN_ROOT/references/" 2>/dev/null | grep -v 'MCCL_SSH_OPTS' | grep -v '<目标节点>' || true)"
+if [ -n "$bare" ]; then
+  err "有不带 \$MCCL_SSH_OPTS 的裸 ssh/scp（密钥未配时会挂起）："
+  echo "$bare" | sed 's/^/        /' >&2
+else
+  ok "ssh/scp 均带 \$MCCL_SSH_OPTS 防挂起"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"

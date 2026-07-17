@@ -8,12 +8,27 @@
 
 编译节点（`$MCCL_NODE0_IP`）上跑着一个容器（`$MCCL_CONTAINER`），源码同步、编译都在容器内完成。但跨节点32卡MPI验证在**宿主机**上跑，因为跨节点连通性（ssh）依赖宿主机网络，而**容器内没有装ssh客户端**。这条边界决定了下面每一步该在哪一层执行。
 
+## 0.5 所有 ssh/scp 必须带 `$MCCL_SSH_OPTS`（防卡死）
+
+```bash
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "..."
+```
+
+`BatchMode=yes` 是关键：密钥没配好时，裸 `ssh` 会**弹密码提示等人输入**——而 agent 的
+Bash 调用背后没有人，它就一直挂在那里直到超时。带上 BatchMode 会立刻失败并报
+`Permission denied (publickey)`，agent 据此上报"密钥没配好，去跑 `bin/mccl-setup-ssh`"，
+这是可处理的错误。`ConnectTimeout=10` 同理防主机不可达时的长时间阻塞；
+`StrictHostKeyChecking=accept-new` 防首次连接时弹 host key 确认提示卡住。
+
+**卡死比失败更糟**：失败会被上报、被监督员看到、被你修；卡死只是让流水线停在那里，
+没有任何产物、没有任何 verdict，你要等到超时才知道出了事。
+
 ## 1. `ssh` + `docker exec` 引号嵌套模板（最容易猜错的地方）
 
 标准形态：
 
 ```bash
-ssh root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'export MACA_PATH=$MCCL_MACA_PATH && cd $MCCL_REMOTE_SRC && <实际命令>'"
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'export MACA_PATH=$MCCL_MACA_PATH && cd $MCCL_REMOTE_SRC && <实际命令>'"
 ```
 
 **为什么是这个引号层级，不能反过来或者少一层：**
@@ -57,17 +72,17 @@ ssh root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'export MACA_PATH=$
 
 ```bash
 # 动作①：单节点8卡验证用（容器内的厂商 MACA lib 目录，宿主机看不见）。始终做。
-ssh root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_VENDOR_MACA_PATH/lib/'"
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_VENDOR_MACA_PATH/lib/'"
 
 # 动作②：跨节点多卡验证用（bind mount 目录，宿主机 mpirun 加载的就是这份）。
 # 仅 $MCCL_NNODES > 1 时需要。编译节点自己走 docker exec + cp：
-ssh root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_MACA_LIB_DIR/'"
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_MACA_LIB_DIR/'"
 
 # 其余节点：循环 $MCCL_NODES 里除第一个之外的每一个，宿主机层 scp，
 # 源文件经 bind mount 在编译节点宿主机上直接可见，不套 docker exec。
 # 单节点时这个循环体为空，自然不执行。
 for ip in $(echo $MCCL_NODES | cut -d' ' -f2-); do
-  ssh root@$MCCL_NODE0_IP "scp $MCCL_REMOTE_SRC/build/libmccl.so root@$ip:$MCCL_MACA_LIB_DIR/"
+  ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "scp $MCCL_SSH_OPTS $MCCL_REMOTE_SRC/build/libmccl.so root@$ip:$MCCL_MACA_LIB_DIR/"
 done
 ```
 
@@ -86,8 +101,8 @@ done
 **规则：一律经`$MCCL_NODE0_IP`跳转。不要依赖直连。**
 
 ```bash
-ssh root@$MCCL_NODE0_IP "ssh root@<目标节点> ..."
-ssh root@$MCCL_NODE0_IP "scp <Node0上的路径> root@<目标节点>:<远程路径>"
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "ssh root@<目标节点> ..."
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "scp <Node0上的路径> root@<目标节点>:<远程路径>"
 ```
 
 理由有两条，第二条是关键：
@@ -132,7 +147,7 @@ rsync -avz --delete --exclude='build/' --exclude='.git/' --exclude='*.so' \
 ```bash
 rsync -avz $MCCL_LOCAL_SRC/<相对路径> \
   root@$MCCL_NODE0_IP:$MCCL_REMOTE_SRC/<相对路径> \
-&& ssh root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'export MACA_PATH=$MCCL_MACA_PATH && cd $MCCL_REMOTE_SRC && rm -rf build/macaify && cd build && make -j50'"
+&& ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'export MACA_PATH=$MCCL_MACA_PATH && cd $MCCL_REMOTE_SRC && rm -rf build/macaify && cd build && make -j50'"
 ```
 
 同样要清`build/macaify`再`make`（见`references/mccl-build-pitfalls.md`第2条），单文件推送不改变这一点——macaify的时间戳检测缺陷跟推送方式无关，只跟源文件是否变化有关。

@@ -53,7 +53,7 @@ TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 单节点验证在**容器内**跑，`--mca plm isolated`，不依赖ssh：
 
 ```bash
-ssh root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'mpirun --allow-run-as-root --mca plm isolated -np $MCCL_NP <二进制> -g 1 -b 8388608 -e 8388608 -n 10 -c 1 -w 5 -o sum -d float'"
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'mpirun --allow-run-as-root --mca plm isolated -np $MCCL_NP <二进制> -g 1 -b 8388608 -e 8388608 -n 10 -c 1 -w 5 -o sum -d float'"
 ```
 
 `<二进制>`用`$MCCL_PERF_BIN_SYM`（对称内存路径，即使跨节点部分测不到，本地8卡内的对称内存注册/kernel选型仍会执行）。日志写入`test-singlenode.log`。
@@ -97,7 +97,7 @@ $MCCL_MPIRUN --allow-run-as-root -np $MCCL_NP \
 **执行位置**：这条命令必须在宿主机层跑，不得进容器（容器内没有ssh，`-host`要求跨节点连通性）。按`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第5节，`$MCCL_NODE0_IP`是唯一与全部节点连通的位置，且mpirun本身依赖宿主机ssh互通，与agent自身运行在哪台机器上无关。若你不是直接运行在能ssh通全部节点的宿主机上，先跳到`$MCCL_NODE0_IP`的宿主机层（不套`docker exec`）再执行上面的命令：
 
 ```bash
-ssh root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在本地展开>"
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在本地展开>"
 ```
 
 单节点模式的命令见第2a节，不适用本节。
