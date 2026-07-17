@@ -13,9 +13,10 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 1. `source mccl-env.sh`，加载16个`MCCL_*`环境变量。
 2. 读`references/mccl-safety.md`（硬禁令，8条，违反ABORT或REWORK）。
 3. 读`references/mccl-build-pitfalls.md`（编译陷阱，尤其第2条macaify增量编译坑）。
-4. 若本次任务涉及对称内存（symmetric memory）、FC kernel、`dev_runtime.cc`、`clique/`目录，额外读`references/mccl-domain.md`。
+4. 读`references/mccl-remote-ops.md`（远程调用模式：ssh+docker exec引号嵌套、`/opt/maca/lib`双重身份、4节点分发方式差异）。执行任何ssh/rsync/docker exec/scp命令前，先确认命令形态与该文档一致，不要凭感觉拼引号。
+5. 若本次任务涉及对称内存（symmetric memory）、FC kernel、`dev_runtime.cc`、`clique/`目录，额外读`references/mccl-domain.md`。
 
-这四步不可跳，每次开工都要做一遍，不因为"上一轮做过"而省略——你和上一轮的自己不共享上下文。
+这五步不可跳，每次开工都要做一遍，不因为"上一轮做过"而省略——你和上一轮的自己不共享上下文。
 
 ## 2. 输入
 
@@ -29,9 +30,9 @@ run目录下的`task.md`，包含：
 ## 3. 工作流
 
 1. 在`$MCCL_LOCAL_SRC`本地源码上做改动。
-2. `rsync`同步到编译节点：目标是`$MCCL_NODE0_IP`上的`$MCCL_REMOTE_SRC`。
-3. 进入`$MCCL_CONTAINER`容器，容器内执行编译（具体命令见第4节"编译内循环"与`references/mccl-build-pitfalls.md`）。
-4. 编译产物`libmccl.so`通过来自Node 0的分发（scp/rsync）推送到`$MCCL_NODE0_IP`、`$MCCL_NODE1_IP`、`$MCCL_NODE2_IP`、`$MCCL_NODE3_IP`四个节点。
+2. `rsync`同步到编译节点：目标是`$MCCL_NODE0_IP`上的`$MCCL_REMOTE_SRC`（具体命令、`--exclude`含义见`references/mccl-remote-ops.md`第7、8节）。
+3. 进入`$MCCL_CONTAINER`容器，容器内执行编译（具体命令见第4节"编译内循环"与`references/mccl-build-pitfalls.md`；ssh+docker exec的引号嵌套写法见`references/mccl-remote-ops.md`第1节）。
+4. 编译产物`libmccl.so`通过来自Node 0的分发（scp/rsync）推送到`$MCCL_NODE0_IP`、`$MCCL_NODE1_IP`、`$MCCL_NODE2_IP`、`$MCCL_NODE3_IP`四个节点。Node 0与Node 1/2/3的分发方式不同、`/opt/maca/lib`在容器内外的双重身份，见`references/mccl-remote-ops.md`第2、3节——照抄前先确认命令是否套了`docker exec`。
 
 ## 4. 编译内循环（上限5轮）
 
