@@ -25,7 +25,9 @@ ssh root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'export MACA_PATH=$
 
 如果命令本身含有需要**在远程/容器内**才展开的变量（而不是本地`$MCCL_*`环境变量），要用反斜杠转义`\$`，避免本地shell提前展开成空值。目前`测试.md`里出现的远程命令均使用`$MCCL_*`（本地已知值）或`&&`拼接的字面命令，没有出现需要远程展开的变量，暂无此类反例可引用。
 
-## 2. `/opt/maca/lib` 的双重身份（隐蔽陷阱）
+## 2. `/opt/maca/lib`（即`$MCCL_VENDOR_MACA_PATH/lib`）的双重身份（隐蔽陷阱）
+
+本节按路径**字符串**讲，所以写字面量`/opt/maca/lib`——重点恰恰是"同一个字符串在两层各指一处"。实际执行的命令里一律用`$MCCL_VENDOR_MACA_PATH/lib`（第3节动作①）。
 
 第3节会说"4个节点**宿主机**的`/opt/maca/lib/`都不更新"，但同一节Node 0的分发动作①里确实执行了`cp libmccl.so /opt/maca/lib/`——这两句话不矛盾，因为它们说的不是同一层：
 
@@ -54,8 +56,8 @@ ssh root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'export MACA_PATH=$
 四条分发命令（引号层级见第1节，跳板规则见第5节）：
 
 ```bash
-# Node 0 动作①：单节点8卡验证用（容器内的 /opt/maca/lib，宿主机看不见）
-ssh root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so /opt/maca/lib/'"
+# Node 0 动作①：单节点8卡验证用（容器内的厂商 MACA lib 目录，宿主机看不见）
+ssh root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_VENDOR_MACA_PATH/lib/'"
 
 # Node 0 动作②：跨节点32卡验证用（bind mount 目录，宿主机 mpirun 加载的就是这份）
 ssh root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_MACA_LIB_DIR/'"

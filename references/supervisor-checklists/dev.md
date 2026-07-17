@@ -28,6 +28,8 @@ stage=dev时使用。产物来源：`change.patch`、`dev-change.md`、`build.lo
 
 怎么查：`build.log`里grep`MACA_PATH`（如`export MACA_PATH=...`或环境回显），比对其值与`$MCCL_MACA_PATH`逐字相等。
 
+**`MACA_PATH`出现两次且值不同，不一定是违规**：走全量重编时，`references/mccl-build-pitfalls.md`第3条的export序列会先把`MACA_PATH`临时指向`$MCCL_VENDOR_MACA_PATH`（只为派生`MACA_CLANG_PATH`/`CUDA_PATH`等工具链变量），**最后一行再改指`$MCCL_MACA_PATH`**才跑cmake。这是规定动作。判据是**cmake/make执行那一刻生效的值**：以`build.log`里最后一次`export MACA_PATH=`的值为准，它必须是`$MCCL_MACA_PATH`。只因为日志里出现过`$MCCL_VENDOR_MACA_PATH`就判REWORK，是误判。
+
 ## 7. `build.log`是否有新增warning → 有则标记
 
 怎么查：`build.log`中grep`warning:`，统计条数与内容，和`dev-change.md`"编译结果"字段里"新增的编译warning"逐条核对。若`build.log`里有而`dev-change.md`未列出，除标记外，这一条也说明"变更清单/编译结果自述与产物不一致"，一并计入判断。
