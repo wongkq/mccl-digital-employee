@@ -32,7 +32,13 @@ run目录下的`task.md`，包含：
 1. 在`$MCCL_LOCAL_SRC`本地源码上做改动。
 2. `rsync`同步到编译节点：目标是`$MCCL_NODE0_IP`上的`$MCCL_REMOTE_SRC`（具体命令、`--exclude`含义见`references/mccl-remote-ops.md`第7、8节）。
 3. 进入`$MCCL_CONTAINER`容器，容器内执行编译（具体命令见第4节"编译内循环"与`references/mccl-build-pitfalls.md`；ssh+docker exec的引号嵌套写法见`references/mccl-remote-ops.md`第1节）。
-4. 编译产物`libmccl.so`通过来自Node 0的分发（scp/rsync）推送到`$MCCL_NODE0_IP`、`$MCCL_NODE1_IP`、`$MCCL_NODE2_IP`、`$MCCL_NODE3_IP`四个节点。Node 0与Node 1/2/3的分发方式不同、`/opt/maca/lib`在容器内外的双重身份，见`references/mccl-remote-ops.md`第2、3节——照抄前先确认命令是否套了`docker exec`。
+4. 分发编译产物`libmccl.so`。**编译流程只有`make -j50`、没有`make install`**，产物停在`$MCCL_REMOTE_SRC/build/`里，不会自己进任何lib目录——四个节点上mpirun要加载的那份，全靠这一步显式送过去。一共**四条命令**（完整命令见`references/mccl-remote-ops.md`第3节，照抄前先确认命令是否套了`docker exec`）：
+
+   - **Node 0 动作①**：`docker exec`进容器，容器内`cp`到容器内`/opt/maca/lib/`——给单节点8卡验证用。
+   - **Node 0 动作②**：`docker exec`进容器，容器内`cp`到`$MCCL_MACA_LIB_DIR`——**给跨节点32卡验证用，这一条最容易漏**。该目录在`$MCCL_REMOTE_WORKDIR`下、容器内外是同一份（bind mount），所以容器内写进去宿主机的mpirun就能加载到；而动作①的`/opt/maca/lib`容器内外同名却是两份，宿主机根本看不见，**做了①不等于做了②**。
+   - **Node 1/2/3**：从Node 0宿主机层`scp`到各自的`$MCCL_MACA_LIB_DIR`（不套`docker exec`，容器内没有ssh/scp客户端）。
+
+   分发完就地自查：第7节要求的五份md5（构建产物 + 四个节点的`$MCCL_MACA_LIB_DIR/libmccl.so`）此时应当已经全部一致。**四个节点里Node 0是唯一一个既是编译节点、又要被分发的**，别因为"产物本来就在这台机器上"而跳过它——产物在`build/`里，不在`$MCCL_MACA_LIB_DIR`里，这是两个目录。
 
 ## 4. 编译内循环（上限5轮）
 
@@ -111,7 +117,7 @@ git diff > <run目录>/change.patch
 - 新增的编译warning（如果有，列出来；没有写"无"）
 - **五份`libmccl.so`的md5，逐个列出具体值**（编译通过才有）：
   1. 构建产物本身：`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`
-  2~5. 四个节点上**mpirun实际会加载的那份**——宿主机层，路径由`$MCCL_LD_LIBRARY_PATH`的库目录部分决定，**不是容器内`/opt/maca/lib`那份**（两者同名不同层，见`references/mccl-remote-ops.md`第2节）
+  2~5. 四个节点（**含Node 0**）上**mpirun实际会加载的那份**：`$MCCL_MACA_LIB_DIR/libmccl.so`——即`$MCCL_LD_LIBRARY_PATH`的库目录部分，**不是容器内`/opt/maca/lib`那份**（两者同名不同层，见`references/mccl-remote-ops.md`第2节）。Node 0这一份由第3节工作流的分发动作②产生，漏了动作②这里就对不上。
 
   五个值必须完全一致。不一致说明分发没真正生效，属于编译未完成，不得交付。
   **必须写出具体md5值，不能写"已分发"、"已同步"这类无法核实的表述**——监督员和测试agent都要拿这五个值做核对。

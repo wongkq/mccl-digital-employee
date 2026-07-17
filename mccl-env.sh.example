@@ -22,6 +22,18 @@ export MCCL_CONTAINER="<container-name>"
 # 是旧版 stub，结构体尺寸不同，会导致跨节点对称内存句柄异常。
 # 详见 references/mccl-build-pitfalls.md
 export MCCL_MACA_PATH="<maca-path>"
+
+# 厂商标准 MACA 安装路径（MetaX SDK 的默认安装位置）。它的 mcMemFabricHandle_t 是
+# 旧版 stub，**不能拿来编译**；但两处仍要用到它：全量重编时先从它派生出编译器与
+# cu-bridge 工具链路径，以及 mxgpu_llvm/bin 的符号链接源。
+# 详见 references/mccl-build-pitfalls.md 第3、4条。
+export MCCL_VENDOR_MACA_PATH="<vendor-maca-path>"
+
+# mpirun 实际加载 libmccl.so 的库目录，也是跨节点分发（4 个节点）的落点。
+# 必须与 MCCL_LD_LIBRARY_PATH 的库目录部分是同一个目录——开发分发到这里、
+# 测试对这里做 md5 核对，两边指同一处才对得上。
+export MCCL_MACA_LIB_DIR="${MCCL_MACA_PATH}/lib"
+
 export MCCL_LOCAL_SRC="<local-repo-path>"
 export MCCL_REMOTE_SRC="<remote-src-path>"
 
@@ -32,5 +44,5 @@ export MCCL_REMOTE_WORKDIR="<remote-workdir>"
 export MCCL_MPIRUN="<mpirun-path>"
 export MCCL_PERF_BIN_ASYM="<asymmetric-perf-binary>"  # 场景A：不带 -R
 export MCCL_PERF_BIN_SYM="<symmetric-perf-binary>"    # 场景B：带 -R 2
-export MCCL_LD_LIBRARY_PATH="<lib-path>:<ompi-lib-path>"
+export MCCL_LD_LIBRARY_PATH="${MCCL_MACA_LIB_DIR}:<ompi-lib-path>"
 export MCCL_TCP_IF_INCLUDE="<cidr>"

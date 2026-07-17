@@ -53,7 +53,7 @@ ssh root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在本地展开>"
 跑任何mpirun之前，逐条核对，记入`test-preflight.md`（每条标注核对方式与结果）：
 
 - [ ] IP仅限`$MCCL_NODE0_IP`/`$MCCL_NODE1_IP`/`$MCCL_NODE2_IP`/`$MCCL_NODE3_IP`——检查本轮将要执行的所有ssh/scp/mpirun命令里出现的IP，逐个比对这四个变量的值，不得出现第五个IP。
-- [ ] `libmccl.so`四节点均已更新——**独立核对md5，不采信`dev-change.md`里开发写的md5声明**。做法：经`$MCCL_NODE0_IP`跳板，对四节点上mpirun实际会加载的那份`libmccl.so`（宿主机层，路径由`$MCCL_LD_LIBRARY_PATH`的库目录部分决定，不是容器内`/opt/maca/lib`那份）分别`md5sum`，同时对`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC`构建产物的`libmccl.so`也`md5sum`一份作为基准，五个结果必须完全一致。任何一个不一致，本条判FAIL，不得继续跑测试，直接上报。
+- [ ] `libmccl.so`四节点均已更新——**独立核对md5，不采信`dev-change.md`里开发写的md5声明**。做法：经`$MCCL_NODE0_IP`跳板，对四个节点（**含Node 0**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（宿主机层，即`$MCCL_LD_LIBRARY_PATH`的库目录部分，不是容器内`/opt/maca/lib`那份）分别`md5sum`，同时对`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`构建产物也`md5sum`一份作为基准，五个结果必须完全一致。任何一个不一致，本条判FAIL，不得继续跑测试，直接上报——**包括Node 0那一份**：Node 0虽然是编译节点，但产物停在`build/`里，需要一次单独的分发动作才会进`$MCCL_MACA_LIB_DIR`（见`references/mccl-remote-ops.md`第3节动作②），不能因为"库本来就是这台机器编的"就默认它已经到位。
 - [ ] `-np 32`，`-host`包含且仅包含四个IP的`:8`——核对方式：命令里的`-np`值等于`$MCCL_NP`，`-host`值逐字等于`$MCCL_HOST_SPEC`。
 - [ ] `MCCL_P2P_LEVEL`和`MCCL_PCIE_BUFFER_MODE`已配置——核对`-x`参数里`MCCL_P2P_LEVEL=PXB`、`MCCL_PCIE_BUFFER_MODE=1`均出现。
 - [ ] `btl_tcp_if_include`为`$MCCL_TCP_IF_INCLUDE`——核对命令里该值逐字等于该变量。

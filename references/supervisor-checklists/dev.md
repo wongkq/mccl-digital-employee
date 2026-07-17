@@ -46,7 +46,9 @@ stage=dev时使用。产物来源：`change.patch`、`dev-change.md`、`build.lo
 
 ## 11. `libmccl.so`是否已分发到4节点 → 否则REWORK
 
-怎么查：`dev-change.md`"编译结果"字段必须列出**五个**具体md5值——构建产物本身（`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`）＋四个节点上mpirun实际会加载的那份（宿主机层，路径由`$MCCL_LD_LIBRARY_PATH`的库目录部分决定，**不是容器内`/opt/maca/lib`那份**，两者同名不同层，见`references/mccl-remote-ops.md`第2节）。五个值必须完全一致。
+怎么查：`dev-change.md`"编译结果"字段必须列出**五个**具体md5值——构建产物本身（`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`）＋四个节点（**含Node 0**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（即`$MCCL_LD_LIBRARY_PATH`的库目录部分，**不是容器内`/opt/maca/lib`那份**，两者同名不同层，见`references/mccl-remote-ops.md`第2节）。五个值必须完全一致。
+
+Node 0是最容易出问题的一个：它既是编译节点又要被分发，产物在`build/`而不在`$MCCL_MACA_LIB_DIR`，需要一次单独的容器内`cp`（`references/mccl-remote-ops.md`第3节动作②）才会到位。若五个值里对不上的恰好是Node 0那一份，八成是这一步被漏了。
 
 笼统写"已分发"、"已同步"这类无法核实的表述，判REWORK。列了但五个值不全一致，说明分发没真正生效，判REWORK。
 
