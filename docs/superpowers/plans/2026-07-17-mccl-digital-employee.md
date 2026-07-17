@@ -13,8 +13,8 @@
 以下约束适用于每个任务，值从spec逐字抄录：
 
 - **`测试.md`永不入库。** 已在`.gitignore`第2行，首次commit前就位，当前不在历史中。任何任务都不得`git add -f 测试.md`
-- **已跟踪文件不得含真实内网IP、主机名映射、真实路径。** 这些只存在于`mccl-env.sh`（不入库）。`mccl-env.sh.example`用`<占位符>`
-- **agent一律读`mccl-env.sh`取环境值，不硬编码**
+- **已跟踪文件不得含私网IP或主机名映射。** 这是保密要求，由`tests/check.sh`不变式3自动强制
+- **agent一律读`mccl-env.sh`取环境值，不硬编码。** 这是**可移植性**要求，不是保密要求——两者理由不同，别混。路径写进`$MCCL_*`变量是为了拷到别的仓库/环境时只改一个文件。因此`references/`中出现`/opt/maca`这类厂商标准路径作为**说明性上下文**是可以的（check.sh不拦），但凡是agent要**实际执行**的路径必须走变量
 - **本仓库只存agent定义**，无法直连远程节点。agent的远程执行行为在本仓库**无法端到端验证**，只能验证静态不变式（frontmatter合法、工具权限正确、变量引用闭合、无IP泄漏）。行为验证推迟到拷入真实仓库后
 - **监督员审产物不审声明**：`change.patch`说了算不是`dev-change.md`说了算；`test-*.log`说了算不是`report.md`说了算
 - **重试分层**：编译内循环≤5、测试外循环`attempt`≤3、报告内循环≤2。只有监督(dev)和监督(test)判REWORK才递增`attempt`
@@ -134,9 +134,9 @@ Expected: 4条`ok:`，末尾`全部通过`，退出码0
 
 Run:
 ```bash
-printf '10.130.40.60\n' > /tmp/ipbait.md && cp /tmp/ipbait.md ./ipbait.md && git add ipbait.md
+printf '10.130.40.60\n' > ipbait.md && git add ipbait.md
 bash tests/check.sh; echo "退出码=$?"
-git rm -f --cached ipbait.md && rm -f ipbait.md ipbait.md
+git rm -f --cached ipbait.md && rm -f ipbait.md
 ```
 Expected: 出现`FAIL: 已跟踪文件含私网IP：ipbait.md`，退出码=1。清理后再跑`bash tests/check.sh`应恢复`全部通过`
 
@@ -451,7 +451,7 @@ Run:
 ```bash
 echo '$MCCL_BOGUS_VAR' >> .claude/agents/mccl-developer.md
 bash tests/check.sh; echo "退出码=$?"
-git checkout .claude/agents/mccl-developer.md 2>/dev/null || sed -i '$ d' .claude/agents/mccl-developer.md
+sed -i '$ d' .claude/agents/mccl-developer.md   # 删掉刚加的最后一行
 ```
 Expected: `FAIL: 引用了未在 mccl-env.sh.example 中定义的变量： MCCL_BOGUS_VAR`，退出码=1
 

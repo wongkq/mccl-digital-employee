@@ -6,3 +6,6 @@ mccl-env.sh
 
 # 运行产物（编译/测试日志，体积大且含内网信息）
 .mccl-runs/
+
+# SDD执行账本（本地scratch）
+.superpowers/
