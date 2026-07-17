@@ -3,7 +3,7 @@
 # 只验证静态不变式。agent的实际行为需拷入真实仓库后验证。
 #
 # 双根：仓库级检查（#1-5）用 REPO_ROOT（git仓库根，测试.md/mccl-env.sh/settings.json所在处）；
-# 插件级检查（#6-11）用 PLUGIN_ROOT（本脚本所在插件的根，agents/references/所在处）。
+# 插件级检查（#6-12）用 PLUGIN_ROOT（本脚本所在插件的根，agents/references/所在处）。
 # 两者在marketplace布局下不是同一目录，混用会查错地方。
 set -uo pipefail
 
@@ -140,6 +140,34 @@ else
     ok "bin/mccl-toolkit-root 自举校验通过（输出=$out）"
   else
     err "bin/mccl-toolkit-root 自举校验失败：期望 $PLUGIN_ROOT，实得 '$out'"
+  fi
+fi
+
+# --- 12. mccl-env.sh.example 里节点派生量确实从 $MCCL_NODES 派生，不是写死的值 ---
+example="$PLUGIN_ROOT/mccl-env.sh.example"
+if [ ! -f "$example" ]; then
+  err "$example 缺失"
+else
+  # 每个派生量必须引用的上游变量：MCCL_NP 是从 MCCL_NNODES 算出来的（间接派生自
+  # MCCL_NODES），其余三个直接引用 MCCL_NODES。
+  derive_bad=""
+  check_derive() {
+    v="$1"; upstream="$2"
+    line=$(grep "^export ${v}=" "$example" || true)
+    if [ -z "$line" ]; then
+      derive_bad="$derive_bad ${v}(未定义)"
+    elif ! echo "$line" | grep -q "$upstream"; then
+      derive_bad="$derive_bad ${v}(未引用\$${upstream}，疑似写死)"
+    fi
+  }
+  check_derive MCCL_NODE0_IP MCCL_NODES
+  check_derive MCCL_NNODES MCCL_NODES
+  check_derive MCCL_NP MCCL_NNODES
+  check_derive MCCL_HOST_SPEC MCCL_NODES
+  if [ -n "$derive_bad" ]; then
+    err "mccl-env.sh.example 节点派生量有问题：$derive_bad"
+  else
+    ok "mccl-env.sh.example 节点派生量（NODE0_IP/NNODES/NP/HOST_SPEC）均从\$MCCL_NODES派生"
   fi
 fi
 
