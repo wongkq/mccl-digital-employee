@@ -13,7 +13,7 @@ description: 跑一轮完整的MCCL开发验证流水线：开发→监督→测
 - 不得自己写`dev-change.md`/`test-result.md`/`report-N.md`——那是对应子代理的活。
 - 不得自己下verdict（PASS/REWORK/ABORT的判断权只属于`mccl-supervisor`）——你只能`head -1`读它写的结论，不能替它判。
 
-调度四个子代理一律用Task工具，`subagent_type`填对应agent名：`mccl-developer`、`mccl-tester`、`mccl-reporter`、`mccl-supervisor`。每次调用的`prompt`里必须写清楚：本轮要读哪些文件（绝对路径）、本轮产物写到哪个目录（绝对路径）。子代理各自的定义文件（`.claude/agents/*.md`）里"run目录"是抽象说法，具体指向哪个路径由你在prompt里明确给出——不给具体路径，子代理没有办法知道该往哪写。
+调度四个子代理一律用你所在harness的子代理调度工具（视版本叫`Task`或`Agent`，认能力不认名字），`subagent_type`填对应agent名：`mccl-developer`、`mccl-tester`、`mccl-reporter`、`mccl-supervisor`。每次调用的`prompt`里必须写清楚：本轮要读哪些文件（绝对路径）、本轮产物写到哪个目录（绝对路径）。子代理各自的定义文件（`.claude/agents/*.md`）里"run目录"是抽象说法，具体指向哪个路径由你在prompt里明确给出——不给具体路径，子代理没有办法知道该往哪写。
 
 你自己只准用Bash做以下这类只读/建目录/写自己产物的操作：`mkdir -p`、`date`、`head -1`（解析verdict）、`cat`/写入`task.md`/`timeline.md`/`escalation.md`、`cp`（拷贝最终报告）、检查文件是否存在。不得用Bash改源码、编译、跑mpirun。
 
