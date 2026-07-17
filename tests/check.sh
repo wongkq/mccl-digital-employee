@@ -87,6 +87,16 @@ else
   ok "环境变量引用闭合"
 fi
 
+# --- 8. mccl-reporter 不得拥有 Bash（防报告造假的物理隔离）---
+rf=".claude/agents/mccl-reporter.md"
+if [ ! -f "$rf" ]; then
+  err "$rf 缺失"
+elif awk '/^---$/{n++; next} n==1' "$rf" | sed -n 's/^tools: *//p' | grep -qw 'Bash'; then
+  err "$rf 的 tools 含 Bash——报告工程师必须无执行能力"
+else
+  ok "mccl-reporter 无 Bash"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"
