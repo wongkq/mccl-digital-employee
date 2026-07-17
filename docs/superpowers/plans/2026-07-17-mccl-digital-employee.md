@@ -55,8 +55,25 @@ README.md                      # 安装到真实仓库的说明
 **环境变量**（Task 1定义，Task 4/5/8消费）：
 `MCCL_NODE0_IP` `MCCL_NODE1_IP` `MCCL_NODE2_IP` `MCCL_NODE3_IP` `MCCL_HOST_SPEC` `MCCL_NP` `MCCL_CONTAINER` `MCCL_MACA_PATH` `MCCL_LOCAL_SRC` `MCCL_REMOTE_SRC` `MCCL_REMOTE_WORKDIR` `MCCL_MPIRUN` `MCCL_PERF_BIN_ASYM` `MCCL_PERF_BIN_SYM` `MCCL_LD_LIBRARY_PATH` `MCCL_TCP_IF_INCLUDE`
 
-**run目录文件名**（Task 8创建目录，Task 4/5/6/7读写）：
-`task.md` `dev-change.md` `change.patch` `build.log` `test-preflight.md` `test-asymmetric.log` `test-symmetric.log` `test-result.md` `test-anomaly.md` `report.md` `verdict-dev.md` `verdict-test.md` `verdict-report.md` `escalation.md` `timeline.md`
+**run目录布局**（Task 8创建，Task 4/5/6/7读写）——**必须按轮次分目录**：
+
+```
+.mccl-runs/<YYYY-MM-DD-HHMM>/
+├── task.md              # 主控每轮重写：任务 + attempt + 上轮待修项
+├── timeline.md          # 全程流水账
+├── attempt-1/
+│   ├── change.patch  dev-change.md  build.log
+│   ├── verdict-dev.md
+│   ├── test-preflight.md  test-asymmetric.log  test-symmetric.log  test-result.md
+│   ├── test-anomaly.md          # 仅异常时
+│   ├── report-1.md  verdict-report-1.md    # 报告内循环第1次
+│   └── report-2.md  verdict-report-2.md    # 仅报告REWORK后才有
+├── attempt-2/ …        # 同构
+├── escalation.md        # 仅ABORT
+└── final-report.md      # 全绿时主控从通过的那份report-N.md拷来
+```
+
+**为什么必须分轮次**：诊断门（第3轮的根因假设必须与前两轮不同）要读`attempt-1/dev-change.md`和`attempt-2/dev-change.md`。平铺布局下第2轮会覆盖第1轮，历史没了，监督员只能报"证据不足"判REWORK——诊断门形同虚设，而它是整个重试设计的核心。报告内循环的`report-N.md`同理，"超2轮"的判定需要看到前几次。
 
 **verdict格式**（Task 7产出，Task 8解析）：文件首行必须是 `判决: PASS` 或 `判决: REWORK` 或 `判决: ABORT`，供编排命令用`head -1`可靠提取。
 

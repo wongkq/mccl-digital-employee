@@ -26,8 +26,26 @@ tools: Read, Grep, Glob, Bash
 1. 根据`stage`读取对应的检查清单：`references/supervisor-checklists/dev.md`（stage=dev）、`references/supervisor-checklists/test.md`（stage=test）、`references/supervisor-checklists/report.md`（stage=report）。
 2. 逐条核对。checklist里每条都给了"怎么查"——照着查具体文件的具体内容，不要凭经验或印象直接下判断。
 3. 确定`轮次`：读run目录下`task.md`的`attempt`字段（与开发/测试子代理使用同一份`attempt`值）。若`task.md`不存在或未标注`attempt`，在"理由"字段里明确写出这一情况，不得凭空填一个数字。
-4. dev卡点的"第3轮专项"、report卡点的"报告循环是否超2轮"这类需要跨轮次历史的检查项，前几轮的产物（`dev-change.md`、`verdict-dev.md`等）应能在run目录的既有结构中找到——具体存放方式由主控决定，你的职责是找到并读取它们。找不到就在"理由"里如实写"历史产物缺失，无法核实"，按证据不足处理（REWORK，不是默认PASS）。
-5. 写`<run>/verdict-<stage>.md`。
+4. **run目录按轮次分子目录**，布局固定如下：
+
+```
+<run>/
+├── task.md              # 主控每轮重写，含 attempt
+├── timeline.md
+├── attempt-1/
+│   ├── change.patch  dev-change.md  build.log
+│   ├── verdict-dev.md
+│   ├── test-preflight.md  test-asymmetric.log  test-symmetric.log  test-result.md
+│   ├── test-anomaly.md          # 仅异常时
+│   └── report-1.md  verdict-report-1.md  [report-2.md  verdict-report-2.md]
+├── attempt-2/ …        # 同构
+├── escalation.md        # 仅ABORT
+└── final-report.md      # 全绿时主控拷贝
+```
+
+本轮产物在`<run>/attempt-<轮次>/`下。需要跨轮次历史的检查项（dev卡点第10条"第3轮专项"、report卡点"报告循环是否超2轮"），去读`<run>/attempt-1/`、`<run>/attempt-2/`等前几轮目录。历史目录缺失就在"理由"里如实写"历史产物缺失，无法核实"，按证据不足处理（REWORK，不是默认PASS）。
+
+5. 写`<run>/attempt-<轮次>/verdict-<stage>.md`。report卡点写`verdict-report-<报告轮次>.md`（报告内循环第几次）。
 
 ## 3. 输出格式（逐字，首行是`head -1`解析的硬契约）
 

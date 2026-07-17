@@ -46,4 +46,10 @@ stage=dev时使用。产物来源：`change.patch`、`dev-change.md`、`build.lo
 
 ## 11. `libmccl.so`是否已分发到4节点 → 否则REWORK
 
-怎么查：`dev-change.md`"编译结果"字段是否列出四节点各自的`libmccl.so`具体md5值（不是笼统写"已分发"、"已同步"这类无法核实的表述）。有Bash执行条件时，可经`$MCCL_NODE0_IP`跳板对四节点的实际库文件路径抽查`md5sum`，核实与`dev-change.md`自报的md5一致（跳板/引号写法见`references/mccl-remote-ops.md`第1、5节）；不具备执行条件时，至少要求`dev-change.md`列出四个具体md5值，否则判REWORK。
+怎么查：`dev-change.md`"编译结果"字段必须列出**五个**具体md5值——构建产物本身（`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`）＋四个节点上mpirun实际会加载的那份（宿主机层，路径由`$MCCL_LD_LIBRARY_PATH`的库目录部分决定，**不是容器内`/opt/maca/lib`那份**，两者同名不同层，见`references/mccl-remote-ops.md`第2节）。五个值必须完全一致。
+
+笼统写"已分发"、"已同步"这类无法核实的表述，判REWORK。列了但五个值不全一致，说明分发没真正生效，判REWORK。
+
+有Bash执行条件时，经`$MCCL_NODE0_IP`跳板抽查`md5sum`核实自报值属实（跳板/引号写法见`references/mccl-remote-ops.md`第1、5节）。不具备执行条件时，至少要求五个值齐全且一致。
+
+注：测试agent会在开跑前**独立重算**这五个md5、不采信开发自报值，这是设计好的交叉验证。你这一关查的是"有没有如实列出"，测试那一关查的是"列的是不是真的"。

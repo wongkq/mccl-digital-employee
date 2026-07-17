@@ -109,7 +109,14 @@ git diff > <run目录>/change.patch
 - 内循环实际用了几轮
 - 是否最终通过
 - 新增的编译warning（如果有，列出来；没有写"无"）
-- `libmccl.so`的md5（`md5sum libmccl.so`的输出，编译通过才有）
+- **五份`libmccl.so`的md5，逐个列出具体值**（编译通过才有）：
+  1. 构建产物本身：`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`
+  2~5. 四个节点上**mpirun实际会加载的那份**——宿主机层，路径由`$MCCL_LD_LIBRARY_PATH`的库目录部分决定，**不是容器内`/opt/maca/lib`那份**（两者同名不同层，见`references/mccl-remote-ops.md`第2节）
+
+  五个值必须完全一致。不一致说明分发没真正生效，属于编译未完成，不得交付。
+  **必须写出具体md5值，不能写"已分发"、"已同步"这类无法核实的表述**——监督员和测试agent都要拿这五个值做核对。
+
+  注意：测试agent会**独立重算**这五个md5，不采信你写的值。你如实写，对不上时双方能立刻定位；你写得好看，只会在下一道卡点被抓出来，白烧一轮。
 
 ### 自评风险
 
