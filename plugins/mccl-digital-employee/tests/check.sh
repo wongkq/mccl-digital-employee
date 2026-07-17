@@ -88,7 +88,7 @@ ok "agent frontmatter 检查完成"
 
 # --- 7. agent 引用的 MCCL_ 变量都在 mccl-env.sh.example 中定义 ---
 undef=""
-for v in $(grep -rhoE '\$\{?MCCL_[A-Z0-9_]+' "$PLUGIN_ROOT/agents/" "$PLUGIN_ROOT/commands/" "$PLUGIN_ROOT/references/" 2>/dev/null \
+for v in $(grep -rhoE '\$\{?MCCL_[A-Z0-9_]+' "$PLUGIN_ROOT/agents/" "$PLUGIN_ROOT/commands/" "$PLUGIN_ROOT/references/" "$PLUGIN_ROOT/bin/" 2>/dev/null \
            | sed 's/[${]//g' | sort -u); do
   grep -q "^export ${v}=" "$PLUGIN_ROOT/mccl-env.sh.example" || undef="$undef $v"
 done
