@@ -39,7 +39,7 @@ cd <你的MCCL仓库根>
 cp ~/.claude/plugins/marketplaces/mccl-digital-employee/plugins/mccl-digital-employee/mccl-env.sh.example ./mccl-env.sh
 # 编辑mccl-env.sh：填入MCCL_NODES、MCCL_CONTAINER、MCCL_MACA_PATH等18个变量的真实值
 
-# 3. 配好本机到编译节点的免密
+# 3. 配好本机到编译节点的免密（<插件根> 是什么、怎么查，见紧接着的说明）
 bash <插件根>/bin/mccl-setup-ssh
 
 # 4. 在MCCL仓库根启动claude
@@ -50,6 +50,23 @@ claude
 ```
 
 **必须在MCCL仓库根目录启动claude。** 四个子代理开工第一步都是`git rev-parse --show-toplevel`锚定`REPO_ROOT`，`mccl-env.sh`、MCCL源码、`.mccl-runs/`都挂在这个根下面（`agents/mccl-developer.md`第1节、`agents/mccl-tester.md`第1节、`agents/mccl-supervisor.md`第2节口径一致）。子代理继承的是主会话启动时的工作目录，不是它自己猜的路径——虽然在仓库子目录里启动`git rev-parse --show-toplevel`也能解析出仓库根，但主控在`commands/mccl-run.md`第2节里把`RUN_DIR`拼成`$REPO_ROOT/.mccl-runs/...`并作为绝对路径传给每个子代理；如果你在别的目录启动、又手动`cd`过仓库，容易在"我以为的仓库根"和"实际解析出的仓库根"之间产生认知错位，导致你后面手动拼路径（例如下方场景化调用时）对不上。最省心的做法就是老老实实在仓库根启动。
+
+### `<插件根>`是什么、怎么查
+
+README里凡是写`<插件根>`的地方（如`bash <插件根>/bin/mccl-setup-ssh`），指的都是**这套工具包的文件实际落地的那个目录**——里面有`agents/`、`commands/`、`references/`、`bin/`、`tests/`、`mccl-env.sh.example`。它不是固定值，取决于你用哪种装法，所以写成占位符：
+
+- **插件装法**：`~/.claude/plugins/marketplaces/<某目录>/plugins/mccl-digital-employee/`。`<某目录>`因add方式而不同，别硬记。
+- **拷贝装法**：你`git clone`到的地方，如`~/mccl-digital-employee/plugins/mccl-digital-employee/`。
+
+**不用猜，一条命令查出来**（找那个装着`references/`的目录）：
+
+```bash
+find ~/.claude/plugins ~ -maxdepth 8 -name mccl-safety.md 2>/dev/null | sed 's|/references/mccl-safety.md||'
+```
+
+打印出来的就是`<插件根>`。之后凡是README让你`bash <插件根>/xxx`，把`<插件根>`换成这条查出来的路径即可。例如查出来是`~/mccl-digital-employee/plugins/mccl-digital-employee`，那么配免密就是`bash ~/mccl-digital-employee/plugins/mccl-digital-employee/bin/mccl-setup-ssh`。
+
+**注意区分两个不同的"根"**：`<插件根>`是工具包文件所在处（你手动敲那几条命令时要填它）；`REPO_ROOT`是你的MCCL仓库根（agent运行时自己`git rev-parse`解析，不用你管）。agent跑起来后靠`bin/mccl-toolkit-root`自动定位插件根，也不用你告诉它——`<插件根>`只在**你手动执行**`mccl-setup-ssh`、`check.sh`这类命令时才需要你填。
 
 ## 安装到真实仓库
 
@@ -129,7 +146,7 @@ cp $SRC/mccl-env.sh.example  ./mccl-env.sh
 
 插件安装时两者是不同目录（插件在`~/.claude/plugins/...`，仓库是你自己的MCCL仓库）；项目内拷贝装法下两者是同一目录，`mccl-toolkit-root`取不到时的退回逻辑保证了这种情况照样能用。
 
-装完之后建议跑一次自检：
+装完之后建议跑一次自检（`<插件根>`怎么查见上方「`<插件根>`是什么、怎么查」）：
 
 ```bash
 bash <插件根>/tests/check.sh
