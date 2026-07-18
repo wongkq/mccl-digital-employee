@@ -274,6 +274,21 @@ export MCCL_GPUS_PER_NODE=8
 
 **本次节点数可配置化改造未覆盖的部分**：`bin/mccl-setup-ssh`（免密自检脚本）仍然硬编码检查"编译节点 → 3个其余节点"这一固定形态，只对4节点配置准确；`tests/check.sh`只验证`mccl-env.sh.example`的静态派生关系，不验证agent在真实单节点/8节点集群上的实际行为（这一点与已知限制第1条一致，本身就是本仓库的固有边界，不是本次改造新引入的）。
 
+## 编译模式：容器 vs 无容器
+
+改编译模式只改`mccl-env.sh`一行：
+
+```bash
+export MCCL_CONTAINER="<container-name>"   # 填容器名=容器模式；留空（""）=无容器模式
+```
+
+| `MCCL_CONTAINER` | 模式 | 编译在哪跑 | 前提 |
+|---|---|---|---|
+| 非空（如`"zb"`） | 容器模式（现状） | 编译节点（`$MCCL_NODE0_IP`）上的容器内，远程命令套`docker exec $MCCL_CONTAINER bash -c` | 容器已建好、镜像里已装好MACA SDK与工具链 |
+| 空字符串`""` | 无容器模式 | 编译节点宿主机，远程命令用`bash -lc`（登录shell，不套`docker exec`） | 宿主机上装好完整MACA SDK，且工具链（mxcc、cu-bridge）能被登录shell的`~/.bashrc`等加载到`PATH`——这是硬前提，无容器模式下没有容器替你准备环境 |
+
+判断方式agent一律用`[ -n "$MCCL_CONTAINER" ]`，为真即容器模式。两种模式在功能上等价：拓扑校验、编译陷阱（macaify增量缓存、`MACA_PATH`选型）、md5契约（`$MCCL_NNODES + 1`份全部一致）都不因模式而变，唯一差别是远程命令是否多套一层`docker exec`。无容器模式下分发链路更简单——没有容器内外之分，编译产物直接在宿主机文件系统里，原本容器模式"两个`docker exec cp`动作"合并成一条普通`cp`（详见`references/mccl-remote-ops.md`第0.1、1、3节，`references/mccl-build-pitfalls.md`第2、3节）。
+
 ## 用法
 
 ```

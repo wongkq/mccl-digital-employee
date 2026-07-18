@@ -98,12 +98,17 @@ else
   done
 fi
 
-echo "== 3. 容器 ($MCCL_CONTAINER) 可达 =="
-if ssh $SSH_OPTS "root@$MCCL_NODE0_IP" "docker exec $MCCL_CONTAINER true" 2>/dev/null; then
-  echo "   通"
+if [ -n "$MCCL_CONTAINER" ]; then
+  echo "== 3. 容器 ($MCCL_CONTAINER) 可达 =="
+  if ssh $SSH_OPTS "root@$MCCL_NODE0_IP" "docker exec $MCCL_CONTAINER true" 2>/dev/null; then
+    echo "   通"
+  else
+    echo "   不通 ← 编译会失败。检查容器名是否为 $MCCL_CONTAINER、是否在运行" >&2
+    fail=1
+  fi
 else
-  echo "   不通 ← 编译会失败。检查容器名是否为 $MCCL_CONTAINER、是否在运行" >&2
-  fail=1
+  echo "== 3. 无容器模式（MCCL_CONTAINER 为空）：跳过容器检查 =="
+  echo "   编译直接在宿主机跑，请确认编译节点已装好 MACA SDK 且 mxcc 在登录shell的PATH里"
 fi
 
 echo

@@ -43,8 +43,9 @@ TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
    | 其他 | **不是受支持的拓扑** | **停止，不改代码、不编译，直接上报** |
 
    "其他"这一档必须停的理由：`CliqueManager::IsSupported()`的OAM32分支不匹配2/3/5...节点，对称内存路径不会启用，会静默fallback到Ring/Tree——在这种拓扑下改代码、编译、分发出去的产物，后续测试验证不到真正要验证的路径，产出一份看起来正常的交付反而更有害。在`dev-change.md`的"根因假设"字段之前，先写明`$MCCL_NNODES`的值与为何判定为不支持，然后上报。
+7. **判断编译模式**：`[ -n "$MCCL_CONTAINER" ]`为真=容器模式（现状，远程命令套`docker exec $MCCL_CONTAINER`），为空=无容器模式（远程命令直接在宿主机跑，见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第0.1、1节）。本轮下面所有编译、分发命令都按这个判断结果选形态，不要混用。
 
-这六步不可跳，每次开工都要做一遍，不因为"上一轮做过"而省略——你和上一轮的自己不共享上下文。
+这七步不可跳，每次开工都要做一遍，不因为"上一轮做过"而省略——你和上一轮的自己不共享上下文。
 
 ## 2. 输入
 
@@ -59,16 +60,22 @@ run目录下的`task.md`，包含：
 
 1. 在`$MCCL_LOCAL_SRC`本地源码上做改动。
 2. `rsync`同步到编译节点：目标是`$MCCL_NODE0_IP`上的`$MCCL_REMOTE_SRC`（具体命令、`--exclude`含义见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第7、8节）。
-3. 进入`$MCCL_CONTAINER`容器，容器内执行编译（具体命令见第4节"编译内循环"与`$TOOLKIT_ROOT/references/mccl-build-pitfalls.md`；ssh+docker exec的引号嵌套写法见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第1节）。
-4. 分发编译产物`libmccl.so`。**编译流程只有`make -j50`、没有`make install`**，产物停在`$MCCL_REMOTE_SRC/build/`里，不会自己进任何lib目录——`$MCCL_NODES`里每个节点上mpirun要加载的那份，全靠这一步显式送过去。分发动作按`$MCCL_NNODES`走（完整命令见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第3节，照抄前先确认命令是否套了`docker exec`）：
+3. 执行编译：容器模式下进入`$MCCL_CONTAINER`容器、容器内执行；无容器模式下直接在宿主机登录shell（`bash -lc`）执行——按第1节判断出的模式选形态（具体命令见第4节"编译内循环"与`$TOOLKIT_ROOT/references/mccl-build-pitfalls.md`第2、3节；两种模式的ssh引号嵌套写法见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第0.1、1节）。
+4. 分发编译产物`libmccl.so`。**编译流程只有`make -j50`、没有`make install`**，产物停在`$MCCL_REMOTE_SRC/build/`里，不会自己进任何lib目录——`$MCCL_NODES`里每个节点上mpirun要加载的那份，全靠这一步显式送过去。分发动作按`$MCCL_NNODES`走，且按第1节判断出的`$MCCL_CONTAINER`模式选形态（完整命令见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第3节，照抄前先确认命令是否该套`docker exec`）：
 
+   **容器模式**（`$MCCL_CONTAINER`非空）：
    - **动作①（编译节点，始终做）**：`docker exec`进容器，容器内`cp`到容器内`$MCCL_VENDOR_MACA_PATH/lib/`——给单节点8卡验证用。
    - **动作②（编译节点，仅`$MCCL_NNODES` > 1时需要）**：`docker exec`进容器，容器内`cp`到`$MCCL_MACA_LIB_DIR`——**给跨节点mpirun验证用，这一条最容易漏**。该目录在`$MCCL_REMOTE_WORKDIR`下、容器内外是同一份（bind mount），所以容器内写进去宿主机的mpirun就能加载到；而动作①的`$MCCL_VENDOR_MACA_PATH/lib`容器内外同名却是两份，宿主机根本看不见，**做了①不等于做了②**。单节点模式（`$MCCL_NNODES=1`）不需要这一条，因为单节点验证走的是动作①、不经宿主机mpirun。
-   - **其余节点（循环，仅`$MCCL_NNODES` > 1时有）**：`for ip in $(echo $MCCL_NODES | cut -d' ' -f2-); do ...; done`，从编译节点宿主机层`scp`到各自的`$MCCL_MACA_LIB_DIR`（不套`docker exec`，容器内没有ssh/scp客户端）。单节点模式下`$MCCL_NODES`只有一个IP，这个循环体天然为空，不执行、不需要特殊判断。
+
+   **无容器模式**（`$MCCL_CONTAINER`为空）：没有容器内外之分，动作①②合并成一条普通`cp`（不套`docker exec`）——编译节点自己`cp`到`$MCCL_MACA_LIB_DIR`即可，单节点和多节点场景通用（见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第3节"无容器模式"）。
+
+   **其余节点（循环，仅`$MCCL_NNODES` > 1时有，两种模式相同）**：`for ip in $(echo $MCCL_NODES | cut -d' ' -f2-); do ...; done`，从编译节点宿主机层`scp`到各自的`$MCCL_MACA_LIB_DIR`（不套`docker exec`，容器内没有ssh/scp客户端）。单节点模式下`$MCCL_NODES`只有一个IP，这个循环体天然为空，不执行、不需要特殊判断。
 
    分发完就地自查：第7节要求的md5（构建产物 + 各节点的`libmccl.so`，多节点模式共`$MCCL_NNODES + 1`份、单节点模式共2份）此时应当已经全部一致。多节点模式下，**编译节点是唯一一个既是编译节点、又要被分发的**，别因为"产物本来就在这台机器上"而跳过它——产物在`build/`里，不在`$MCCL_MACA_LIB_DIR`里，这是两个目录。
 
 ## 4. 编译内循环（上限5轮）
+
+以下命令按第1节判断出的`$MCCL_CONTAINER`模式，套`docker exec $MCCL_CONTAINER bash -c`（容器模式）或`bash -lc`（无容器模式）执行，两种形态的完整命令见`$TOOLKIT_ROOT/references/mccl-build-pitfalls.md`第2条。
 
 编译前必须：
 ```bash
@@ -148,9 +155,9 @@ git diff > <run目录>/change.patch
 - 是否最终通过
 - 新增的编译warning（如果有，列出来；没有写"无"）
 - **`libmccl.so`的md5，逐个列出具体值**（编译通过才有）。多节点模式（`$MCCL_NNODES=4`或`8`）共`$MCCL_NNODES + 1`份；单节点模式（`$MCCL_NNODES=1`）共2份：
-  1. 构建产物本身：`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`
-  2. 容器内`$MCCL_VENDOR_MACA_PATH/lib/libmccl.so`（单节点8卡验证用，第3节动作①产生）
-  3~（`$MCCL_NNODES + 1`）：**仅多节点模式需要**——`$MCCL_NODES`里每个节点（**含编译节点**）上**mpirun实际会加载的那份**：`$MCCL_MACA_LIB_DIR/libmccl.so`——即`$MCCL_LD_LIBRARY_PATH`的库目录部分，**不是容器内`$MCCL_VENDOR_MACA_PATH/lib`那份**（两者同名不同层，见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第2节）。编译节点这一份由第3节工作流的分发动作②产生，漏了动作②这里就对不上。
+  1. 构建产物本身：`$MCCL_NODE0_IP`上`$MCCL_REMOTE_SRC/build/libmccl.so`（容器模式在容器内，无容器模式在宿主机，路径字面量相同）
+  2. 容器模式：容器内`$MCCL_VENDOR_MACA_PATH/lib/libmccl.so`（单节点8卡验证用，第3节动作①产生，经`docker exec`cp）；无容器模式：动作①②合并，这一份与下面第3条是同一份`$MCCL_MACA_LIB_DIR/libmccl.so`（直接`cp`产生），不单列
+  3~（`$MCCL_NNODES + 1`）：**仅多节点模式需要**——`$MCCL_NODES`里每个节点（**含编译节点**）上**mpirun实际会加载的那份**：`$MCCL_MACA_LIB_DIR/libmccl.so`——即`$MCCL_LD_LIBRARY_PATH`的库目录部分，**容器模式下不是容器内`$MCCL_VENDOR_MACA_PATH/lib`那份**（两者同名不同层，见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第2节）。编译节点这一份，容器模式经第3节工作流的分发动作②（`docker exec`cp）产生，无容器模式经合并后的直接`cp`产生，漏了这一步这里就对不上。
 
   多节点模式下`$MCCL_NNODES + 1`个值必须完全一致；单节点模式下2个值必须一致。不一致说明分发没真正生效，属于编译未完成，不得交付。
   **必须写出具体md5值，不能写"已分发"、"已同步"这类无法核实的表述**——监督员和测试agent都要拿这些值做核对。
@@ -166,7 +173,11 @@ git diff > <run目录>/change.patch
 **重定向必须在 `ssh` 外面，日志落到本地 run 目录**（见`$TOOLKIT_ROOT/references/mccl-remote-ops.md` §0.6）：
 
 ```bash
+# 容器模式（$MCCL_CONTAINER非空）
 ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c '...make -j50'" \
+  > "<run目录>/build.log" 2>&1
+# 无容器模式（$MCCL_CONTAINER为空）
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc '...make -j50'" \
   > "<run目录>/build.log" 2>&1
 ```
 

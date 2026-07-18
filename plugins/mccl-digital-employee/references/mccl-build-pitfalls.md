@@ -21,12 +21,16 @@ MACA安装里`mcMemFabricHandle_t`结构体有两个版本：
 
 原因：macaify把源文件拷贝到`build/macaify/`目录（改名`.cu.cpp`后交给mxcc处理）用的是CMake的`copy_if_different`，这个机制不检测源文件时间戳变化，增量`make`不会触发重新拷贝。
 
-标准增量编译流程：
+标准增量编译流程，按`$MCCL_CONTAINER`是否非空（`[ -n "$MCCL_CONTAINER" ]`）选形态（远程执行两种形态见`references/mccl-remote-ops.md`第1节）：
+
 ```bash
-cd $MCCL_REMOTE_SRC
-rm -rf build/macaify
-cd build && make -j50
+# 容器模式（$MCCL_CONTAINER非空）
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'export MACA_PATH=$MCCL_MACA_PATH && cd $MCCL_REMOTE_SRC && rm -rf build/macaify && cd build && make -j50'" > "$RUN/build.log" 2>&1
+# 无容器模式（$MCCL_CONTAINER为空）
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc 'export MACA_PATH=$MCCL_MACA_PATH && cd $MCCL_REMOTE_SRC && rm -rf build/macaify && cd build && make -j50'" > "$RUN/build.log" 2>&1
 ```
+
+无容器模式的前提（硬前提，不是可选项）：宿主机上必须装好完整MACA SDK，且工具链（mxcc、cu-bridge）在登录shell的`PATH`里——容器模式下这个由容器保证，无容器模式下由宿主机环境保证。用`bash -lc`（登录shell）而不是`bash -c`就是为了让这套工具链能被`source`进`PATH`（详见`references/mccl-remote-ops.md`第1节）。
 
 **这是最容易踩的坑，会让人误以为改动没生效，转而怀疑代码逻辑本身出了问题**——遇到"改了但行为没变"时，先检查是不是漏了这一步，再去查代码逻辑。
 
@@ -57,6 +61,17 @@ cmake -DCMAKE_CXX_COMPILER=$MACA_PATH/mxgpu_llvm/bin/mxcc \
       -DENABLE_CPACK=OFF ..
 make -j50
 ```
+
+以上是脚本本体，与`$MCCL_CONTAINER`是否非空无关；两种模式的差别只在“这段脚本在哪一层shell执行”，按`references/mccl-remote-ops.md`第1节的两种远程执行形态套上去：
+
+```bash
+# 容器模式（$MCCL_CONTAINER非空）
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c '<以上整段脚本，用&&拼接>'" > "$RUN/build.log" 2>&1
+# 无容器模式（$MCCL_CONTAINER为空）
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc '<以上整段脚本，用&&拼接>'" > "$RUN/build.log" 2>&1
+```
+
+无容器模式同样要求宿主机已装好完整MACA SDK、工具链在登录shell的`PATH`里（见第2条的前提说明），`bash -lc`而非`bash -c`的原因同第2条。
 
 **为什么`MACA_PATH`要先指`$MCCL_VENDOR_MACA_PATH`、最后再改指`$MCCL_MACA_PATH`**：中间五个变量（`MACA_CLANG_PATH`、`LD_LIBRARY_PATH`、`CUDA_PATH`、`CUCC_PATH`、`NVCC_PATH`）都是从当时的`$MACA_PATH`**派生**出来的，它们要的是厂商标准安装里那套完整的编译器与cu-bridge工具链；而`$MCCL_MACA_PATH`那份的价值只在于头文件里正确的`mcMemFabricHandle_t`（第1条），工具链并不全（第4条的符号链接就是为了补它）。所以先用厂商路径把工具链变量都派生好，最后一行再把`MACA_PATH`本身改指正确版本，让cmake按它取头文件和安装前缀。
 

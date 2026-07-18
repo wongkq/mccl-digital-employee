@@ -8,6 +8,14 @@
 
 编译节点（`$MCCL_NODE0_IP`）上跑着一个容器（`$MCCL_CONTAINER`），源码同步、编译都在容器内完成。但跨节点32卡MPI验证在**宿主机**上跑，因为跨节点连通性（ssh）依赖宿主机网络，而**容器内没有装ssh客户端**。这条边界决定了下面每一步该在哪一层执行。
 
+以上是**容器模式**（`$MCCL_CONTAINER`非空）下的形态。
+
+## 0.1 容器模式 vs 无容器模式（总纲）
+
+开关是`$MCCL_CONTAINER`：非空（如`"zb"`）=容器模式，编译等远程命令套一层`docker exec $MCCL_CONTAINER`；空字符串=无容器模式，编译直接在宿主机（`$MCCL_NODE0_IP`）shell执行，不套`docker exec`。判断方式一律：`[ -n "$MCCL_CONTAINER" ]`为真=容器模式。
+
+两种模式在文档里并列给出，不是二选一删掉；容器模式是现状（`mccl-env.sh.example`默认注释即此），无容器模式是本次新增的开关分支。远程执行的两种形态见第1节，编译命令见`references/mccl-build-pitfalls.md`第2、3节，分发见第3节。
+
 ## 0.5 所有 ssh/scp 必须带 `$MCCL_SSH_OPTS`（防卡死）
 
 ```bash
@@ -47,13 +55,25 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<远程命令> > build.log 2>&1"
 ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<mpirun 命令>" > "$RUN_DIR/test-asymmetric.log" 2>&1 &
 ```
 
-## 1. `ssh` + `docker exec` 引号嵌套模板（最容易猜错的地方）
+## 1. 远程执行的两种形态：`ssh` + `docker exec`（容器模式）/ `ssh` + `bash -lc`（无容器模式）
 
-标准形态：
+按`$MCCL_CONTAINER`是否非空（`[ -n "$MCCL_CONTAINER" ]`）二选一，两种形态并列如下：
+
+**容器模式**（`$MCCL_CONTAINER`非空，现状）：
 
 ```bash
 ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'export MACA_PATH=$MCCL_MACA_PATH && cd $MCCL_REMOTE_SRC && <实际命令>'"
 ```
+
+**无容器模式**（`$MCCL_CONTAINER`为空字符串）：
+
+```bash
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc 'export MACA_PATH=$MCCL_MACA_PATH && cd $MCCL_REMOTE_SRC && <实际命令>'"
+```
+
+两者结构完全一样，只是无容器模式少了`docker exec $MCCL_CONTAINER`这一段，直接把命令交给远程的`bash`执行。
+
+**为什么无容器模式用`bash -lc`（登录shell）而不是`bash -c`**：容器模式下`bash -c`已经够用，因为容器内环境已经把mxcc、cu-bridge等工具链准备好、直接在`PATH`里；无容器模式没有容器帮你准备环境，工具链要靠宿主机的`~/.bashrc`/`~/.bash_profile`/module等加载到`PATH`，而这些只有**登录shell**（`-l`）才会`source`。用`bash -c`会导致远程命令拿不到工具链，报"命令未找到"这类错误。**这是无容器模式的硬前提**：宿主机上必须装好完整MACA SDK，且mxcc、cu-bridge在登录shell的`PATH`里。
 
 **为什么是这个引号层级，不能反过来或者少一层：**
 
@@ -65,6 +85,8 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'exp
 如果命令本身含有需要**在远程/容器内**才展开的变量（而不是本地`$MCCL_*`环境变量），要用反斜杠转义`\$`，避免本地shell提前展开成空值。目前`测试.md`里出现的远程命令均使用`$MCCL_*`（本地已知值）或`&&`拼接的字面命令，没有出现需要远程展开的变量，暂无此类反例可引用。
 
 ## 2. `/opt/maca/lib`（即`$MCCL_VENDOR_MACA_PATH/lib`）的双重身份（隐蔽陷阱）
+
+**本节仅容器模式（`$MCCL_CONTAINER`非空）相关**；无容器模式没有容器内外之分，"同一路径两份"这类问题不存在，见第3节无容器分发。
 
 本节按路径**字符串**讲，所以写字面量`/opt/maca/lib`——重点恰恰是"同一个字符串在两层各指一处"。实际执行的命令里一律用`$MCCL_VENDOR_MACA_PATH/lib`（第3节动作①）。
 
@@ -111,6 +133,25 @@ done
 ```
 
 为什么编译节点与其余节点的动作②形态不同（一个`docker exec`+`cp`、一个`scp`）：目标目录是同一个（`$MCCL_MACA_LIB_DIR`），只是编译节点上这个目录本机就有、且容器内可直接写到，而其余节点要跨机器传输、且容器内没有ssh/scp客户端（见第6节），只能在宿主机层发起。
+
+以上是**容器模式**（`$MCCL_CONTAINER`非空）下的分发方式。
+
+**无容器模式**（`$MCCL_CONTAINER`为空）——没有容器内外之分，编译产物`$MCCL_REMOTE_SRC/build/libmccl.so`就在宿主机文件系统里，动作①②合并成一条普通`cp`，不套`docker exec`：
+
+```bash
+# 编译节点自己：直接 cp 到本机 MACA lib（不套 docker exec）。给单节点验证、
+# 也给跨节点mpirun用——无容器模式下$MCCL_VENDOR_MACA_PATH/lib与$MCCL_MACA_LIB_DIR
+# 不再是"容器内外两份"，视两者实际路径关系而定，通常直接cp到$MCCL_MACA_LIB_DIR即可。
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_MACA_LIB_DIR/"
+
+# 其余节点：从编译节点 scp（这条和容器模式完全一样——容器模式下其余节点本来就是
+# 宿主机层scp，不经容器，无容器模式没有变化）
+for ip in $(echo $MCCL_NODES | cut -d' ' -f2-); do
+  ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "scp $MCCL_SSH_OPTS $MCCL_REMOTE_SRC/build/libmccl.so root@$ip:$MCCL_MACA_LIB_DIR/"
+done
+```
+
+无容器模式下第2节那套"`/opt/maca/lib`双重身份/bind mount"整段不适用——没有容器内外之分，"同一路径两份"的问题不存在，一次`cp`就是全部分发动作。md5契约不变：仍是`$MCCL_NNODES + 1`份、全部一致，只是编译节点那份的产生方式从"`docker exec` cp"变成"直接`cp`"。
 
 **编译节点的动作②是本工具包相对`测试.md`原始工作流的补充，不是抄来的。** `测试.md`的"分发`libmccl.so`到4节点"一节只有三条`scp`（发往其余三节点）加一条编译节点容器内到`/opt/maca/lib/`的`cp`，编译节点的`$MCCL_MACA_LIB_DIR`从头到尾没有被写过；同时全文只有`make -j50`、没有`make install`，产物也不会自流进去。也就是说，照`测试.md`的字面步骤执行，编译节点在多卡验证时加载的`libmccl.so`并非本次构建产物——这是原始工作流里一个真实存在的洞（原文当时能跑通，最可能是该文件由更早的某次操作留在了那里，`测试.md`未记载，本文档不替它补设定），不是本工具包新发明的要求。补上它是为了让"md5全一致"这条跨三方（开发第7节、dev卡点第11条、测试第4节）的契约在编译节点上真正可满足。
 

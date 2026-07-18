@@ -6,7 +6,7 @@ stage=test时使用。产物来源：`test-preflight.md`、`test-asymmetric.log`
 
 ## 1. 执行前checklist是否逐条核对并记录在`test-preflight.md` → 否则REWORK
 
-怎么查：先核实`test-preflight.md`里记录的`$MCCL_NNODES`值走的是哪个子表。多节点模式（`$MCCL_NNODES=4`或`8`）核对`.claude/agents/mccl-tester.md`第4a节列出的六条（IP范围、`libmccl.so`各节点md5独立核对、`-np`/`-host`、`MCCL_P2P_LEVEL`与`MCCL_PCIE_BUFFER_MODE`、`btl_tcp_if_include`、场景A/B命令就绪）是否六条都在；单节点模式（`$MCCL_NNODES=1`）核对第4b节列出的四条（IP范围、容器内md5核对、`-np`与`--mca plm isolated`、二进制可执行）是否四条都在。每条是否写明了具体的核对方式与结果（而不是笼统一句"已核对"）。任一条缺失或只有结论没有核对过程，判REWORK。
+怎么查：先核实`test-preflight.md`里记录的`$MCCL_NNODES`值走的是哪个子表。多节点模式（`$MCCL_NNODES=4`或`8`）核对`.claude/agents/mccl-tester.md`第4a节列出的六条（IP范围、`libmccl.so`各节点md5独立核对、`-np`/`-host`、`MCCL_P2P_LEVEL`与`MCCL_PCIE_BUFFER_MODE`、`btl_tcp_if_include`、场景A/B命令就绪）是否六条都在；单节点模式（`$MCCL_NNODES=1`）核对第4b节列出的四条（IP范围、md5核对——容器模式核对容器内、无容器模式核对宿主机`$MCCL_MACA_LIB_DIR`、`-np`与`--mca plm isolated`、二进制可执行）是否四条都在。每条是否写明了具体的核对方式与结果（而不是笼统一句"已核对"）。任一条缺失或只有结论没有核对过程，判REWORK。
 
 ## 2. 场景A是否跑了（`test-asymmetric.log`存在且非空）→ 否则REWORK
 
@@ -44,7 +44,7 @@ stage=test时使用。产物来源：`test-preflight.md`、`test-asymmetric.log`
 
 - `-np`的值等于`$MCCL_NP`（应为8）
 - 命令中出现`--mca plm isolated`
-- 命令是在容器内执行的（`docker exec`上下文），不是宿主机层`-host`形态
+- 命令按`$MCCL_CONTAINER`对应形态执行：容器模式在`docker exec`上下文（容器内），无容器模式在`bash -lc`上下文（宿主机登录shell，不套`docker exec`）；两种模式均不是宿主机层`-host`形态（那是跨节点mpirun专用，见第4a节）
 
 任一项缺失或值不符，判REWORK。
 

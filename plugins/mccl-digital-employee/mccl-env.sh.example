@@ -35,6 +35,10 @@ export MCCL_HOST_SPEC="$(for ip in $MCCL_NODES; do printf '%s:%s,' "$ip" "$MCCL_
 # 密钥没配好时应该跑 bin/mccl-setup-ssh，不是让 agent 挂在那里。
 export MCCL_SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
 
+# 留空=无容器模式，编译直接在宿主机（$MCCL_NODE0_IP）跑，不套 docker exec；
+# 此时需宿主机装好完整 MACA SDK 且工具链（mxcc、cu-bridge）在登录 shell 的 PATH 里。
+# 填容器名（如 "zb"）=容器模式，远程命令套一层 docker exec $MCCL_CONTAINER。
+# 判断方式：[ -n "$MCCL_CONTAINER" ] 为真=容器模式。不要手工派生、不要给它设默认值。
 export MCCL_CONTAINER="<container-name>"
 
 # --- 编译 ---

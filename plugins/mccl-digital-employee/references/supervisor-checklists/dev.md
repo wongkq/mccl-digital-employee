@@ -22,7 +22,7 @@ stage=dev时使用。产物来源：`change.patch`、`dev-change.md`、`build.lo
 
 ## 5. 是否在编译节点之外的节点上编译或改源码 → **ABORT**
 
-怎么查：读`mccl-env.sh`（或run目录里能核实到的`$MCCL_NODES`值），取除第一个（编译节点，`$MCCL_NODE0_IP`）之外的每个IP，在`build.log`中grep这些IP，确认它们只出现在分发（scp/cp目标）上下文里，不出现在`make`、`docker exec ... bash -c`编译命令的上下文里。
+怎么查：读`mccl-env.sh`（或run目录里能核实到的`$MCCL_NODES`值），取除第一个（编译节点，`$MCCL_NODE0_IP`）之外的每个IP，在`build.log`中grep这些IP，确认它们只出现在分发（scp/cp目标）上下文里，不出现在`make`、`docker exec ... bash -c`（容器模式）或`bash -lc`（无容器模式）编译命令的上下文里。
 
 ## 6. `build.log`中`MACA_PATH`是否为`$MCCL_MACA_PATH` → 否则REWORK
 
@@ -71,12 +71,12 @@ stage=dev时使用。产物来源：`change.patch`、`dev-change.md`、`build.lo
 
 怎么查：先核实`$MCCL_NNODES`的值（读`mccl-env.sh`或run目录里能核实到的值）。`dev-change.md`"编译结果"字段必须列出对应份数的具体md5值：
 
-- 多节点模式（`$MCCL_NNODES=4`或`8`）：**`$MCCL_NNODES + 1`个**——构建产物本身（`$MCCL_NODE0_IP`容器内`$MCCL_REMOTE_SRC/build/libmccl.so`）＋`$MCCL_NNODES`个节点（**含编译节点**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（即`$MCCL_LD_LIBRARY_PATH`的库目录部分，**不是容器内`$MCCL_VENDOR_MACA_PATH/lib`那份**，两者同名不同层，见`references/mccl-remote-ops.md`第2节）。
-- 单节点模式（`$MCCL_NNODES=1`）：**2个**——构建产物本身 ＋ 容器内`$MCCL_VENDOR_MACA_PATH/lib/libmccl.so`（第3节动作①产生）。单节点模式不要求`$MCCL_MACA_LIB_DIR`那份，那是给跨节点宿主机mpirun用的，本模式用不上，不得因为"只列了2个"就判REWORK。
+- 多节点模式（`$MCCL_NNODES=4`或`8`）：**`$MCCL_NNODES + 1`个**——构建产物本身（`$MCCL_NODE0_IP`上`$MCCL_REMOTE_SRC/build/libmccl.so`，容器模式在容器内、无容器模式在宿主机）＋`$MCCL_NNODES`个节点（**含编译节点**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（即`$MCCL_LD_LIBRARY_PATH`的库目录部分，容器模式下**不是容器内`$MCCL_VENDOR_MACA_PATH/lib`那份**，两者同名不同层，见`references/mccl-remote-ops.md`第2节）。
+- 单节点模式（`$MCCL_NNODES=1`）：**2个**——构建产物本身 ＋ 第二份。容器模式下第二份是容器内`$MCCL_VENDOR_MACA_PATH/lib/libmccl.so`（第3节动作①产生），此时不要求`$MCCL_MACA_LIB_DIR`那份（那是给跨节点宿主机mpirun用的，单节点模式用不上）；无容器模式下动作①②已合并，第二份就是宿主机`$MCCL_MACA_LIB_DIR/libmccl.so`（直接`cp`产生）。不得因为"只列了2个"就判REWORK。
 
 对应份数的md5值必须完全一致。
 
-编译节点是多节点模式下最容易出问题的一个：它既是编译节点又要被分发，产物在`build/`而不在`$MCCL_MACA_LIB_DIR`，需要一次单独的容器内`cp`（`references/mccl-remote-ops.md`第3节动作②）才会到位。若对不上的恰好是编译节点那一份，八成是这一步被漏了。
+编译节点是多节点模式下最容易出问题的一个：它既是编译节点又要被分发，产物在`build/`而不在`$MCCL_MACA_LIB_DIR`，需要一次单独的`cp`才会到位——容器模式经容器内`cp`（`references/mccl-remote-ops.md`第3节动作②），无容器模式经宿主机直接`cp`（同节动作①②合并后的形态）。若对不上的恰好是编译节点那一份，八成是这一步被漏了。
 
 笼统写"已分发"、"已同步"这类无法核实的表述，判REWORK。列了但值不全一致，说明分发没真正生效，判REWORK。份数与`$MCCL_NNODES`推算出的预期不符（多了或少了），同样判REWORK。
 
