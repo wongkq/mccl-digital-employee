@@ -198,6 +198,29 @@ bash <插件根>/tests/check.sh
 
 这份`tests/check.sh`本身也可以整份拷进真实仓库长期留用，作为每次改动agent定义/references后的静态自检。
 
+## 更新插件
+
+仓库有新提交后，插件装法（方式一）的用户按三步拿到更新：
+
+```
+# 1. 刷新 marketplace 索引（重新拉远程仓库最新内容）
+/plugin marketplace update mccl-digital-employee
+
+# 2. 把插件升到最新
+/plugin update mccl-digital-employee@mccl-digital-employee
+
+# 3. 激活新版本（不用重启claude，这条即可）
+/reload-plugins
+```
+
+**本插件不设固定版本号，跟着 commit 走**——`plugin.json` 里刻意不写 `version` 字段，所以每推一个新 commit，用户 update 就能拿到，不用等"发版"。（如果哪天改成写死 `version`，就必须每次改动都手动 bump 那个号，否则用户 update 会显示"已是最新版"、拿不到新内容——这个坑本插件用不设版本号来规避。）
+
+**嫌手动麻烦可以开自动更新**：`/plugin` 打开管理器 → **Marketplaces** 标签 → 选中本 marketplace → 启用 **auto-update**。之后 claude 每次启动会在后台检查更新，有新版会提示你 `/reload-plugins`。
+
+**拷贝装法（方式二）的更新**就是普通 git：进你 clone 工具包的目录 `git pull`，再重新 `cp` 一遍到 MCCL 仓库（`agents/`、`commands/`、`references/`）。`mccl-env.sh` 是你自己填的、不会被覆盖，放心。
+
+**看当前装的是哪个版本 / 有没有加载错误**：`/plugin` → **Installed** 标签，或 `claude plugin list`。
+
 ## 换机器 / 换节点IP
 
 IP变了只改一个文件：`mccl-env.sh`（不入库）。改完跑一次：
