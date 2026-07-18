@@ -57,16 +57,31 @@ else
       echo "   主机都不可达时配密钥没有意义，这里直接停，不进入密码提示。" >&2
       exit 1 ;;
   esac
-  echo "   主机可达但未配密钥，开始配置。"
+  echo "   主机可达但未配密钥。"
+  # 公钥不存在就先生成（非交互，安全）——这样等下不管谁跑 ssh-copy-id 都有 key 可用
   if [ ! -f "$HOME/.ssh/id_rsa.pub" ] && [ ! -f "$HOME/.ssh/id_ed25519.pub" ]; then
     echo "   本机没有ssh公钥，生成中（无密码短语）..."
     ssh-keygen -t ed25519 -N '' -f "$HOME/.ssh/id_ed25519" -q || { echo "   ssh-keygen失败"; exit 1; }
   fi
-  echo "   接下来会提示输入 root@$MCCL_NODE0_IP 的密码（只用这一次，不存盘）："
-  ssh-copy-id -o StrictHostKeyChecking=accept-new "root@$MCCL_NODE0_IP" || {
-    echo "   ssh-copy-id 失败" >&2; exit 1; }
-  ssh $SSH_OPTS "root@$MCCL_NODE0_IP" true 2>/dev/null \
-    && echo "   配置成功" || { echo "   配置后仍不通" >&2; exit 1; }
+  # ssh-copy-id 会交互式弹密码。分两种情况：
+  #   - 有交互终端（你自己在终端里跑）：直接跑，输一次密码
+  #   - 没有交互终端（AI通过Bash工具在跑）：弹密码会卡死到超时——不硬闯，
+  #     把现成命令交还给你，你手动跑这一条即可，其余都不用管
+  if [ -t 0 ]; then
+    echo "   接下来会提示输入 root@$MCCL_NODE0_IP 的密码（只用这一次，不存盘）："
+    ssh-copy-id -o StrictHostKeyChecking=accept-new "root@$MCCL_NODE0_IP" || {
+      echo "   ssh-copy-id 失败" >&2; exit 1; }
+    ssh $SSH_OPTS "root@$MCCL_NODE0_IP" true 2>/dev/null \
+      && echo "   配置成功" || { echo "   配置后仍不通" >&2; exit 1; }
+  else
+    echo "   检测到没有交互终端（多半是AI在替你跑本脚本）。" >&2
+    echo "   配密钥要输一次密码，这一步只能你自己来。请在你的终端里手动跑这一条：" >&2
+    echo "" >&2
+    echo "       ssh-copy-id -o StrictHostKeyChecking=accept-new root@$MCCL_NODE0_IP" >&2
+    echo "" >&2
+    echo "   输一次密码即可（不存盘）。跑完再让AI重新执行本脚本，它就会跳过这步继续往下检查。" >&2
+    exit 2   # 退出码2 = 需要人工输密码，区别于退出码1的真失败
+  fi
 fi
 
 if [ -z "$PEERS" ]; then
