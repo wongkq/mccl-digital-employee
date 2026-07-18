@@ -11,7 +11,7 @@
 | OAM32 PCIe Switch | 4 | 8 | 8 | 11 |
 | OAM64 PCIe Switch | 8 | 8 | 8 | 15 |
 
-这些常量由`devrOamNodeCount()`根据CliqueManager拓扑**直接返回**，不经过hostHash动态计算（commit `b05c0cb`优化后的行为）。OAM32/64的8卡/节点数由PCIe Switch硬件结构决定，写死在代码里，不要假设它会跟着运行时拓扑重新计算。
+这些常量由`devrOamNodeCount()`根据CliqueManager拓扑**直接返回**，不经过hostHash动态计算（commit `b05c0cb`优化后的行为）。OAM32/64的8卡/节点数由PCIe Switch硬件结构决定，写死在代码里，不要假设它会跟着运行时拓扑重新计算。`$MCCL_GPUS_PER_NODE`必须为8才能对上代码里硬编码的`nodeSize=8`/`GROUP=8`；填其他值时对称内存与FC kernel路径不会按设计运行。
 
 ## 2. 8+3 对称内存窗口 slot 语义
 

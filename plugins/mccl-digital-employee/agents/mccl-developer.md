@@ -33,16 +33,16 @@ TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 3. 读`$TOOLKIT_ROOT/references/mccl-build-pitfalls.md`（编译陷阱，尤其第2条macaify增量编译坑）。
 4. 读`$TOOLKIT_ROOT/references/mccl-remote-ops.md`（远程调用模式：ssh+docker exec引号嵌套、`/opt/maca/lib`双重身份、4节点分发方式差异）。执行任何ssh/rsync/docker exec/scp命令前，先确认命令形态与该文档一致，不要凭感觉拼引号。
 5. 若本次任务涉及对称内存（symmetric memory）、FC kernel、`dev_runtime.cc`、`clique/`目录，额外读`$TOOLKIT_ROOT/references/mccl-domain.md`。
-6. **拓扑合法性校验**：`source mccl-env.sh`之后得到`$MCCL_NNODES`（从`$MCCL_NODES`派生）。MCCL的拓扑常量硬编码，只支持OAM32（4节点）和OAM64（8节点）；单节点（1）是本工具包额外支持的冒烟模式。
+6. **拓扑合法性校验**：`source mccl-env.sh`之后得到`$MCCL_NNODES`（从`$MCCL_NODES`派生）与`$MCCL_GPUS_PER_NODE`。MCCL的拓扑常量硬编码，`nodeSize=8`由PCIe Switch硬件结构决定、代码里直接写死（见`$TOOLKIT_ROOT/references/mccl-domain.md`第14行），只支持OAM32（4节点×8卡）和OAM64（8节点×8卡）；单节点（1节点，任意卡数）是本工具包额外支持的冒烟模式。判定标准同时看`$MCCL_NNODES`和`$MCCL_GPUS_PER_NODE`：
 
-   | `$MCCL_NNODES` | 含义 | 怎么做 |
-   |---|---|---|
-   | 1 | 单节点冒烟 | 正常开工，第3节分发动作②（跨节点mpirun用的库目录）不需要做 |
-   | 4 | OAM32 | 正常开工，完整分发 |
-   | 8 | OAM64 | 正常开工，完整分发 |
-   | 其他 | **不是受支持的拓扑** | **停止，不改代码、不编译，直接上报** |
+   | `$MCCL_NNODES` | `$MCCL_GPUS_PER_NODE` | 含义 | 怎么做 |
+   |---|---|---|---|
+   | 1 | 任意 | 单节点冒烟 | 正常开工，第3节分发动作②（跨节点mpirun用的库目录）不需要做。`!=8`不影响开发能否编译分发，只影响tester的覆盖度声明 |
+   | 4 或 8 | **必须`==8`** | OAM32/OAM64 | 正常开工，完整分发 |
+   | 4 或 8 | `!=8` | 节点数达标但每节点卡数不达标 | **归入"其他"档，停止，不改代码、不编译，直接上报** |
+   | 其他`$MCCL_NNODES`（2/3/5...） | 任意 | **不是受支持的拓扑** | **停止，不改代码、不编译，直接上报** |
 
-   "其他"这一档必须停的理由：`CliqueManager::IsSupported()`的OAM32分支不匹配2/3/5...节点，对称内存路径不会启用，会静默fallback到Ring/Tree——在这种拓扑下改代码、编译、分发出去的产物，后续测试验证不到真正要验证的路径，产出一份看起来正常的交付反而更有害。在`dev-change.md`的"根因假设"字段之前，先写明`$MCCL_NNODES`的值与为何判定为不支持，然后上报。
+   "其他"这一档（含"NNODES∈{4,8}但GPUS_PER_NODE≠8"）必须停的理由：`CliqueManager::IsSupported()`的OAM32分支不匹配2/3/5...节点，对称内存路径不会启用，会静默fallback到Ring/Tree；而NNODES∈{4,8}但每节点卡数不是8时，代码里硬编码的`nodeSize=8`/`GROUP=8`与实际拓扑对不上，同样不会按设计启用对称内存路径——两者是同一条fallback逻辑。在这种拓扑下改代码、编译、分发出去的产物，后续测试验证不到真正要验证的路径，产出一份看起来正常的交付反而更有害。在`dev-change.md`的"根因假设"字段之前，先写明`$MCCL_NNODES`、`$MCCL_GPUS_PER_NODE`的值与为何判定为不支持，然后上报。
 7. **判断编译模式**：`[ -n "$MCCL_CONTAINER" ]`为真=容器模式（现状，远程命令套`docker exec $MCCL_CONTAINER`），为空=无容器模式（远程命令直接在宿主机跑，见`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第0.1、1节）。本轮下面所有编译、分发命令都按这个判断结果选形态，不要混用。
 
 这七步不可跳，每次开工都要做一遍，不因为"上一轮做过"而省略——你和上一轮的自己不共享上下文。

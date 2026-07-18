@@ -261,16 +261,17 @@ export MCCL_GPUS_PER_NODE=8
 
 `MCCL_NODE0_IP`、`MCCL_NNODES`、`MCCL_NP`、`MCCL_HOST_SPEC`都从这两行派生，不需要、也不应该手改（`tests/check.sh`不变式12会检查这几个派生量确实引用了`$MCCL_NODES`，防止手改成写死的值导致两处不一致）。
 
-**只支持三档节点数**，因为MCCL的拓扑常量（`nNodes`/`nodeSize`/`extLsaSize`）由`devrOamNodeCount()`硬编码返回，只认OAM32（4节点）和OAM64（8节点）两种形态：
+**只支持三档节点数**，因为MCCL的拓扑常量（`nNodes`/`nodeSize`/`extLsaSize`）由`devrOamNodeCount()`硬编码返回，只认OAM32（4节点）和OAM64（8节点）两种形态。但这两种形态还有一个隐含前提：`nodeSize=8`同样是硬编码值，由PCIe Switch硬件结构决定，代码里没有按`$MCCL_GPUS_PER_NODE`重新计算。所以拓扑校验同时看节点数和每节点卡数，**能测对称内存的组合只有(8卡,4节点)和(8卡,8节点)**：
 
-| `$MCCL_NODES`个数 | 拓扑 | 测什么 | 不测什么 |
-|---|---|---|---|
-| 1 | 单节点冒烟 | 容器内8卡本地路径：编译产物能否跑通、本节点内的kernel选型与内存注册基本行为 | **跨节点对称内存路径完全不覆盖**——`symMemoryMapLsaTeamExtended`的跨节点fabric handle导入、`bootstrapAllGather`全局交换、`37ba549`正式方案都不会执行（单节点时`extLsaSize=8+1-1=8`，跨节点slot [8,extLsaSize)根本不存在）。更关键的是`info.rank % GROUP`这类修复在单节点下**不可区分**：`info.rank`只有0..7，`GROUP=8`，`rank % 8 == rank`，有bug的代码和修好的代码行为完全一致——单节点测试对这一类越界/索引bug没有诊断能力 |
-| 4 | OAM32 | 场景A（非对称内存，`$MCCL_PERF_BIN_ASYM`）+ 场景B（对称内存，`$MCCL_PERF_BIN_SYM -R 2`）两个32卡`mpirun`测试，`extLsaSize=11` | 无（这是本工具包原本针对的完整拓扑） |
-| 8 | OAM64 | 同OAM32，`-np 64`，`extLsaSize=15` | 无 |
-| 其他（2/3/5/6/7/9+...） | **不支持** | 不跑 | 全部——`CliqueManager::IsSupported()`的OAM32分支不匹配这些节点数，对称内存路径不会启用，会静默fallback到Ring/Tree。在这种拓扑下继续跑比不跑更有害：会产生一份看起来"跑通了、有perf数据"的报告，但报告里的数字压根没测到对称内存路径。开发/测试子代理开工时会先做拓扑合法性校验，遇到这一档**停止并上报，不跑任何mpirun**（见`references/supervisor-checklists/{dev,test}.md`各自的"拓扑合法性"一条，闷头跑了判ABORT） |
+| `$MCCL_NODES`个数 | `$MCCL_GPUS_PER_NODE` | 拓扑 | 测什么 | 不测什么 |
+|---|---|---|---|---|
+| 1 | 任意 | 单节点冒烟 | 容器内8卡本地路径：编译产物能否跑通、本节点内的kernel选型与内存注册基本行为 | **跨节点对称内存路径完全不覆盖**——`symMemoryMapLsaTeamExtended`的跨节点fabric handle导入、`bootstrapAllGather`全局交换、`37ba549`正式方案都不会执行（单节点时`extLsaSize=8+1-1=8`，跨节点slot [8,extLsaSize)根本不存在）。更关键的是`info.rank % GROUP`这类修复在单节点下**不可区分**：`info.rank`只有0..7，`GROUP=8`，`rank % 8 == rank`，有bug的代码和修好的代码行为完全一致——单节点测试对这一类越界/索引bug没有诊断能力。若`$MCCL_GPUS_PER_NODE!=8`，还要额外声明节点内对称内存路径本身也未覆盖（见下） |
+| 4 | **8** | OAM32 | 场景A（非对称内存，`$MCCL_PERF_BIN_ASYM`）+ 场景B（对称内存，`$MCCL_PERF_BIN_SYM -R 2`）两个32卡`mpirun`测试，`extLsaSize=11` | 无（这是本工具包原本针对的完整拓扑） |
+| 8 | **8** | OAM64 | 同OAM32，`-np 64`，`extLsaSize=15` | 无 |
+| 4 或 8 | `!=8`（如"4节点2卡"） | **不支持** | 不跑 | 全部——节点数达标但每节点卡数不是8，代码里硬编码的`nodeSize=8`/`GROUP=8`与实际拓扑对不上，对称内存路径同样不会按设计启用，与下面"其他节点数"档是同一条fallback逻辑，归入同一档处理 |
+| 其他节点数（2/3/5/6/7/9+...） | 任意 | **不支持** | 不跑 | 全部——`CliqueManager::IsSupported()`的OAM32分支不匹配这些节点数，对称内存路径不会启用，会静默fallback到Ring/Tree。在这种拓扑下继续跑比不跑更有害：会产生一份看起来"跑通了、有perf数据"的报告，但报告里的数字压根没测到对称内存路径。开发/测试子代理开工时会先做拓扑合法性校验，遇到这两档**停止并上报，不跑任何mpirun**（见`references/supervisor-checklists/{dev,test}.md`各自的"拓扑合法性"一条，闷头跑了判ABORT） |
 
-单节点模式下，`test-result.md`**必须显式声明**上表"不测什么"那一格的两点（跨节点对称内存路径未执行、`info.rank % GROUP`类bug无诊断能力）——这是监督员`stage=test`卡点专门核对的一条，漏了判REWORK，比测试没跑更严重（见`references/supervisor-checklists/test.md`第2、3条）。工具包的核心价值是"如实声明覆盖了什么"，节点数越少，这条声明就越重要。
+单节点模式下，`test-result.md`**必须显式声明**上表"不测什么"那一格的两点（跨节点对称内存路径未执行、`info.rank % GROUP`类bug无诊断能力）；若`$MCCL_GPUS_PER_NODE!=8`，还要额外强制声明第三条（每节点非8卡、`nodeSize=8`硬编码不匹配、节点内对称内存路径未覆盖）——这是监督员`stage=test`卡点专门核对的一条，漏了判REWORK，比测试没跑更严重（见`references/supervisor-checklists/test.md`第2、3条）。工具包的核心价值是"如实声明覆盖了什么"，节点数越少或每节点卡数越偏离8，这条声明就越重要。
 
 **本次节点数可配置化改造未覆盖的部分**：`bin/mccl-setup-ssh`（免密自检脚本）仍然硬编码检查"编译节点 → 3个其余节点"这一固定形态，只对4节点配置准确；`tests/check.sh`只验证`mccl-env.sh.example`的静态派生关系，不验证agent在真实单节点/8节点集群上的实际行为（这一点与已知限制第1条一致，本身就是本仓库的固有边界，不是本次改造新引入的）。
 

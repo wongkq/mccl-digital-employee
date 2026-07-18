@@ -84,11 +84,11 @@ stage=dev时使用。产物来源：`change.patch`、`dev-change.md`、`build.lo
 
 注：测试agent会在开跑前**独立重算**这些md5、不采信开发自报值，这是设计好的交叉验证。你这一关查的是"有没有如实列出"，测试那一关查的是"列的是不是真的"。
 
-## 12. 拓扑合法性：`$MCCL_NNODES`不是1/4/8时，是否停止并上报 → 否则**ABORT**
+## 12. 拓扑合法性：`$MCCL_NNODES`与`$MCCL_GPUS_PER_NODE`的组合不属于S且不是单节点冒烟时，是否停止并上报 → 否则**ABORT**
 
-怎么查：核实`$MCCL_NNODES`的值（读`mccl-env.sh`或run目录里能核实到的值）。若值不是1、4、8三者之一：
+怎么查：核实`$MCCL_NNODES`与`$MCCL_GPUS_PER_NODE`的值（读`mccl-env.sh`或run目录里能核实到的值）。定义对称内存标准拓扑`S = ($MCCL_GPUS_PER_NODE==8 且 $MCCL_NNODES∈{4,8})`。若`$MCCL_NNODES==1`（单节点冒烟，任意卡数），本条不触发。否则（`$MCCL_NNODES∈{4,8}`但`$MCCL_GPUS_PER_NODE!=8`，或`$MCCL_NNODES`不是1/4/8）：
 
-- 检查`change.patch`是否为空、`build.log`是否不存在或不含实际编译记录、`dev-change.md`是否记录了"`$MCCL_NNODES`不支持，已上报"这类内容而非正常的七字段交付。
-- 若开发子代理在拓扑不支持的情况下仍然改了代码、编译、分发了`libmccl.so`，视为闷头跑了不该跑的流程——**直接ABORT**，不给REWORK的机会。理由：MCCL只硬编码OAM32/OAM64两种拓扑，`$MCCL_NNODES`为2/3/5等值时对称内存路径不会启用、会静默fallback到Ring/Tree，在这种拓扑下产出的编译与分发结果，后续测试验证不到真正要验证的路径——闷头跑完比停下上报更有害，因为会产生一份看起来正常的交付。
+- 检查`change.patch`是否为空、`build.log`是否不存在或不含实际编译记录、`dev-change.md`是否记录了"`$MCCL_NNODES`/`$MCCL_GPUS_PER_NODE`不支持，已上报"这类内容而非正常的七字段交付。
+- 若开发子代理在拓扑不支持的情况下仍然改了代码、编译、分发了`libmccl.so`（**含`$MCCL_NNODES∈{4,8}`但`$MCCL_GPUS_PER_NODE!=8`却改代码/编译/分发的情况**），视为闷头跑了不该跑的流程——**直接ABORT**，不给REWORK的机会。理由：MCCL只硬编码OAM32/OAM64两种拓扑（`nodeSize=8`由PCIe Switch硬件决定、代码写死），`$MCCL_NNODES`为2/3/5等值、或`$MCCL_NNODES∈{4,8}`但每节点卡数不是8时，对称内存路径不会启用、会静默fallback到Ring/Tree，在这种拓扑下产出的编译与分发结果，后续测试验证不到真正要验证的路径——闷头跑完比停下上报更有害，因为会产生一份看起来正常的交付。
 
-`$MCCL_NNODES`为1、4、8时，本条不触发，按其余各条正常审计（单节点模式下第11条走2份md5的分支，见上）。
+`$MCCL_GPUS_PER_NODE==8`且`$MCCL_NNODES∈{4,8}`，或`$MCCL_NNODES==1`时，本条不触发，按其余各条正常审计（单节点模式下第11条走2份md5的分支，见上）。

@@ -20,6 +20,10 @@
 # 的OAM32分支不匹配2/3/5...节点，对称内存路径不会启用，会静默fallback到
 # Ring/Tree——测出来的东西不是你以为在测的东西。agent遇到其余节点数应停止并上报。
 export MCCL_NODES="<node0-ip> <node1-ip> <node2-ip> <node3-ip>"
+# =8 是对称内存/FC kernel的硬前提：nodeSize=8由PCIe Switch硬件结构决定、代码里
+# 直接硬编码（见references/mccl-domain.md第14行）。填其他值（如2）：单节点时能跑
+# 基础AllReduce冒烟，但对称内存/FC kernel路径不会启用，agent会在报告里声明未覆盖；
+# 多节点（4/8）配非8卡会被agent判为不受支持的拓扑，停止并上报，不跑mpirun。
 export MCCL_GPUS_PER_NODE=8
 
 # 以下四个由上面两行派生，不要手改——手改成写死的值会导致这里和
