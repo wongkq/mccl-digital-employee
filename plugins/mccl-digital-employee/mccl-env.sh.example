@@ -54,11 +54,15 @@ export MCCL_VENDOR_MACA_PATH="<vendor-maca-path>"
 # 测试对这里做 md5 核对，两边指同一处才对得上。
 export MCCL_MACA_LIB_DIR="${MCCL_MACA_PATH}/lib"
 
-export MCCL_LOCAL_SRC="<local-repo-path>"
-export MCCL_REMOTE_SRC="<remote-src-path>"
-
 # agent 在远程的可写范围边界。此目录之外一律禁止修改。
 export MCCL_REMOTE_WORKDIR="<remote-workdir>"
+
+# 本地 MCCL 源码仓库路径（你自己填，每台机器不同）
+export MCCL_LOCAL_SRC="<local-repo-path>"
+
+# 编译节点上的源码目录 = 工作目录 + 源码目录名。换环境时通常只需改目录名，
+# WORKDIR 变了这里自动跟上。若你的源码不在 WORKDIR 下面，也可以整条写死成绝对路径。
+export MCCL_REMOTE_SRC="${MCCL_REMOTE_WORKDIR}/<repo-dir-name>"
 
 # --- 测试 ---
 export MCCL_MPIRUN="<mpirun-path>"
