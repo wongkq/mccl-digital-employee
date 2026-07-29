@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+# bin/mccl-gpu-probe - GPU 环境探测原语（MCCL数字员工 子系统①）
+#
+# 复用 gpu_health_check.sh 作带宽/健康引擎，补占用检测与结构化 verdict。
+# 产物 gpu-verdict.json，三态 verdict: READY / NOT_READY / error。
+# 只读不改：不杀进程、不改文件、不重启节点（references/mccl-safety.md 第9条）。
+#
+# 退出码（脚本独立调用契约；主控流水线内只读 gpu-verdict.json 的 verdict 字段）：
+#   0 = READY, 1 = NOT_READY, 2 = error
+#
+# 纯函数（parse_health_stats/assemble_verdict/emit_json）可被 tests/ 源码加载单测，
+# 不依赖远程与 mccl-env.json；main() 才做远程编排。
+set -uo pipefail
+
+# ===================== 纯函数（可单测，不碰远程/环境） =====================
+
+# parse_health_stats <report_file>
+# 解析 gpu_health_check.sh 的 health_report.txt 统计行。该脚本颜色变量是字面
+# '\033[..m' 字符串（plain echo 非 -e），故先剥字面转义再剥真实 ESC。
+# 输出 "FAIL=<n> ERROR=<n> WARN=<n> PASS=<n> TOTAL=<n>"（eval-able）；
+# 文件缺失输出全 0 并返回 1。
+parse_health_stats() {
+  local report="$1"
+  if [ ! -f "$report" ]; then
+    echo "FAIL=0 ERROR=0 WARN=0 PASS=0 TOTAL=0"
+    return 1
+  fi
+  local clean
+  clean=$(sed -e 's/\\033\[[0-9;]*m//g' -e $'s/\x1b\\[[0-9;]*m//g' "$report")
+  local total pass warn fail err
+  total=$(printf '%s' "$clean" | grep -oP '总测试项:\s*\K[0-9]+' | tail -1)
+  pass=$(printf '%s'  "$clean" | grep -oP '通过 \(优秀\):\s*\K[0-9]+' | tail -1)
+  warn=$(printf '%s'  "$clean" | grep -oP '警告 \(偏低\):\s*\K[0-9]+' | tail -1)
+  fail=$(printf '%s'  "$clean" | grep -oP '失败 \(异常\):\s*\K[0-9]+' | tail -1)
+  err=$(printf '%s'   "$clean" | grep -oP '错误:\s*\K[0-9]+' | tail -1)
+  echo "FAIL=${fail:-0} ERROR=${err:-0} WARN=${warn:-0} PASS=${pass:-0} TOTAL=${total:-0}"
+  return 0
+}
+
+# assemble_verdict <fail> <error> <warn> <occupied_n> <topo_ok 0|1> <bins_ok 0|1>
+# 输出 READY | NOT_READY。error 态不在本函数产出（脚本崩时由 mccl-prober agent 兜底）。
+# WARN 不改变 verdict（仍 READY），由 main 记进 failures[]。
+assemble_verdict() {
+  local fail="$1" error="$2" warn="$3" occupied="$4" topo_ok="$5" bins_ok="$6"
+  [ "$topo_ok" = "1" ] || { echo "NOT_READY"; return; }
+  [ "$bins_ok" = "1" ] || { echo "NOT_READY"; return; }
+  [ "${occupied:-0}" -gt 0 ] 2>/dev/null && { echo "NOT_READY"; return; }
+  [ "${fail:-0}"  -gt 0 ] 2>/dev/null && { echo "NOT_READY"; return; }
+  [ "${error:-0}" -gt 0 ] 2>/dev/null && { echo "NOT_READY"; return; }
+  echo "READY"
+}
+
+# emit_json - 读环境变量 V_* 生成 gpu-verdict.json（python3 保证 JSON 合法）。
+# 调用者（main / 兜底）须先 export 好 V_* 全集。
+emit_json() {
+  python3 - <<'PY'
+import json, os
+def g(k, d=""): return os.environ.get(k, d)
+def b(k): return os.environ.get(k, "0") == "1"
+def i(k):
+    try: return int(os.environ.get(k, "0") or 0)
+    except: return 0
+try: hosts = json.loads(os.environ.get("V_HOSTS_JSON", "[]"))
+except Exception: hosts = []
+try: occ = json.loads(os.environ.get("V_OCC_JSON", "{}"))
+except Exception: occ = {}
+failures = [l for l in os.environ.get("V_FAILURES", "").splitlines() if l]
+doc = {
+  "verdict": g("V_VERDICT", "error"),
+  "mode": g("V_MODE", "full"),
+  "topology": {"nnodes": i("V_NNODES"), "gpus_per_node": i("V_GPUS"),
+               "mode": g("V_TMODE", ""), "ok": b("V_TOPO_OK")},
+  "hosts": hosts,
+  "occupancy": occ,
+  "bandwidth": {"cached": b("V_BW_CACHED"), "fail": i("V_BW_FAIL"), "error": i("V_BW_ERROR"),
+                "warn": i("V_BW_WARN"), "report": g("V_BW_REPORT")},
+  "bins": {"sym": {"ok": b("V_BINS_SYM")}, "asym": {"ok": b("V_BINS_ASYM")},
+           "mpirun": {"ok": b("V_BINS_MPI")}},
+  "failures": failures,
+  "evidence": {"health_report": g("V_BW_REPORT", ""), "logs": g("V_EVIDENCE_LOGS", "")},
+}
+print(json.dumps(doc, ensure_ascii=False, indent=2))
+PY
+}
+
+# ===================== 环境与根解析 =====================
+
+resolve_toolkit_root() {
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/references/mccl-safety.md" ]; then
+    echo "${CLAUDE_PLUGIN_ROOT}"; return 0
+  fi
+  local self_root
+  self_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  if [ -f "${self_root}/references/mccl-safety.md" ]; then
+    echo "${self_root}"; return 0
+  fi
+  return 1
+}
+
+# load_env: 设 TOOLKIT_ROOT / REPO_ROOT，eval loader 拿到 $MCCL_*。
+load_env() {
+  local tk
+  tk="$(resolve_toolkit_root)" || { echo "mccl-gpu-probe: 找不到 references/mccl-safety.md（工具包未装对位置）" >&2; return 1; }
+  command -v python3 >/dev/null 2>&1 || { echo "mccl-gpu-probe: 需要 python3" >&2; return 1; }
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "mccl-gpu-probe: 不在 git 仓库内，无法定位 mccl-env.json" >&2; return 1; }
+  eval "$(python3 "$tk/bin/mccl-env-load.py")" || return 1
+  TOOLKIT_ROOT="$tk"
+}
+
+usage() {
+  cat <<'EOF'
+用法: mccl-gpu-probe [选项]
+GPU 环境探测原语（MCCL 子系统①）。复用 gpu_health_check.sh，输出 gpu-verdict.json。
+退出码: 0=READY 1=NOT_READY 2=error
+选项:
+  --mode full|quick   full=含带宽(默认)，quick=只拓扑/占用/bin 不跑带宽
+  --hosts IP1 IP2...  覆盖主机列表(空格分隔；缺省取 mccl-env.json 的 MCCL_NODES)
+  --reuse-bw <dir>    带宽缓存目录(同 run 的后续 attempt 复用；缓存为空自动跑并填充)
+  --no-bw-cache       强制重测带宽
+  --out <path>        gpu-verdict.json 输出路径(缺省打到 stdout)
+  --probe-cmd <cmd>   覆盖探测命令(v1 预留：拓扑/bin 取自 mccl-env.json)
+  --bin <path>        覆盖 bin 路径(v1 预留)
+  -h, --help          显示帮助
+EOF
+}
+
+# ===================== 远程检查 =====================
+
+# ssh_exec_read <host> <cmd> ：只读远程命令，输出流回本地。必须带 $MCCL_SSH_OPTS。
+ssh_exec_read() {
+  ssh $MCCL_SSH_OPTS "root@$1" "$2" 2>&1
+}
+
+# check_topology: 设 TOPO_OK/TOPO_MODE/TOPO_NNODES/TOPO_GPUS。判定同 mccl-tester 第2节。
+check_topology() {
+  TOPO_NNODES="$MCCL_NNODES"; TOPO_GPUS="$MCCL_GPUS_PER_NODE"
+  TOPO_OK=0; TOPO_MODE="unsupported"
+  if [ "${MCCL_NNODES:-0}" -eq 1 ] 2>/dev/null; then
+    TOPO_MODE="single-node"; TOPO_OK=1
+  elif { [ "${MCCL_NNODES:-0}" -eq 4 ] || [ "${MCCL_NNODES:-0}" -eq 8 ]; } 2>/dev/null \
+       && [ "${MCCL_GPUS_PER_NODE:-0}" -eq 8 ] 2>/dev/null; then
+    [ "${MCCL_NNODES:-0}" -eq 4 ] && TOPO_MODE="OAM32" || TOPO_MODE="OAM64"
+    TOPO_OK=1
+  fi
+}
+
+# check_bins: 在 NODE0 核对 perf bin / mpirun 可执行。设 BINS_SYM/ASYM/MPI (0|1)。
+check_bins() {
+  BINS_SYM=0; BINS_ASYM=0; BINS_MPI=0
+  local out
+  out=$(ssh_exec_read "$MCCL_NODE0_IP" \
+    "test -x '$MCCL_PERF_BIN_SYM' && echo S; test -x '$MCCL_PERF_BIN_ASYM' && echo A; test -x '$MCCL_MPIRUN' && echo M") || out=""
+  case "$out" in *S*) BINS_SYM=1;; esac
+  case "$out" in *A*) BINS_ASYM=1;; esac
+  case "$out" in *M*) BINS_MPI=1;; esac
+}
+
+# check_occupancy: 每机 mx-smi 进程列表，任一卡有进程即占用。设 OCC_ALL_FREE/OCC_JSON/OCC_N/OCC_FAILURES。
+# mx-smi 输出假设含 "Processes:" 段（仿 nvidia-smi），有数据行=占用。远程格式需真实硬件校准（spec §7/§9.1）。
+check_occupancy() {
+  OCC_ALL_FREE=1; OCC_N=0; OCC_JSON='{"all_free":true,"occupied":[]}'; OCC_FAILURES=""
+  local occ_arr="" host out procs
+  for host in $MCCL_NODES; do
+    out=$(ssh_exec_read "$host" "mx-smi 2>&1") || out=""
+    procs=$(printf '%s' "$out" | sed -n '/Processes:/,$p' | grep -cE '^[[:space:]]+[0-9]+[[:space:]]+[0-9]' || true)
+    if [ "${procs:-0}" -gt 0 ] 2>/dev/null; then
+      OCC_ALL_FREE=0; OCC_N=$((OCC_N+1))
+      occ_arr="$occ_arr{\"host\":\"$host\",\"procs\":[\"mx-smi 报告有进程\"]},"
+      OCC_FAILURES="${OCC_FAILURES}${OCC_FAILURES:+$'\n'}$host GPU 有进程占用"
+    fi
+  done
+  occ_arr="${occ_arr%,}"
+  OCC_JSON="{\"all_free\":$([ $OCC_ALL_FREE -eq 1 ] && echo true || echo false),\"occupied\":[$occ_arr]}"
+}
+
+# run_bandwidth <cache_dir>: 在 NODE0 上跑 gpu_health_check.sh --no-deploy，拉回 health_report 解析。
+# 命中缓存则复用。设 BW_FAIL/ERROR/WARN/PASS/TOTAL/CACHED/REPORT。返回 0=有报告，2=出错。
+run_bandwidth() {
+  local cache_dir="$1"
+  local report="$cache_dir/health_report.txt"
+  BW_FAIL=0; BW_ERROR=0; BW_WARN=0; BW_PASS=0; BW_TOTAL=0; BW_CACHED=0; BW_REPORT=""
+  if [ -z "${NO_BW_CACHE:-}" ] && [ -f "$report" ]; then
+    BW_CACHED=1; BW_REPORT="$report"
+  else
+    mkdir -p "$cache_dir"
+    local ghc="$REPO_ROOT/gpu_health_check.sh"
+    if [ ! -f "$ghc" ]; then
+      echo "mccl-gpu-probe: gpu_health_check.sh 缺失：$ghc（不静默跳过带宽检查）" >&2
+      return 2
+    fi
+    local nodes_csv; nodes_csv=$(echo $MCCL_NODES | tr ' ' ',')
+    scp $MCCL_SSH_OPTS "$ghc" "root@$MCCL_NODE0_IP:/tmp/mccl_ghc.sh" >/dev/null 2>&1 || return 2
+    ssh $MCCL_SSH_OPTS "root@$MCCL_NODE0_IP" "bash /tmp/mccl_ghc.sh --hosts '$nodes_csv' --no-deploy" \
+      > "$cache_dir/ghc.out" 2>&1 || true
+    local rdir
+    rdir=$(ssh $MCCL_SSH_OPTS "root@$MCCL_NODE0_IP" "ls -td \$HOME/gpu_health_results_* 2>/dev/null | head -1") || rdir=""
+    [ -n "$rdir" ] || return 2
+    scp $MCCL_SSH_OPTS "root@$MCCL_NODE0_IP:$rdir/health_report.txt" "$report" >/dev/null 2>&1 || return 2
+    BW_REPORT="$report"
+  fi
+  local s FAIL ERROR WARN PASS TOTAL
+  s=$(parse_health_stats "$report") || return 2
+  eval "$s"
+  BW_FAIL=${FAIL:-0}; BW_ERROR=${ERROR:-0}; BW_WARN=${WARN:-0}; BW_PASS=${PASS:-0}; BW_TOTAL=${TOTAL:-0}
+  return 0
+}
+
+# ===================== main =====================
+
+emit_error_json() {  # <msg>：脚本自身出错时也写一份合法 error JSON（减少依赖 agent 兜底）
+  export V_VERDICT=error V_MODE="${MODE_OUT:-full}" V_NNODES=0 V_GPUS=0 V_TMODE="" V_TOPO_OK=0
+  export V_BW_FAIL=0 V_BW_ERROR=0 V_BW_WARN=0 V_BW_CACHED=0 V_BW_REPORT="" V_OCC_JSON='{"all_free":true,"occupied":[]}'
+  export V_HOSTS_JSON="[]" V_BINS_SYM=0 V_BINS_ASYM=0 V_BINS_MPI=0 V_EVIDENCE_LOGS="" V_FAILURES="$1"
+  if [ -n "${PROBE_OUT:-}" ]; then emit_json > "$PROBE_OUT"; else emit_json; fi
+}
+
+main() {
+  local mode=full hosts="" reuse_bw="" no_bw_cache=0 probe_cmd="" bin_override="" out=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --mode) mode="$2"; shift 2;;
+      --hosts) hosts="$2"; shift 2;;
+      --reuse-bw) reuse_bw="$2"; shift 2;;
+      --no-bw-cache) no_bw_cache=1; shift;;
+      --out) out="$2"; shift 2;;
+      --probe-cmd) probe_cmd="$2"; shift 2;;
+      --bin) bin_override="$2"; shift 2;;
+      -h|--help) usage; exit 0;;
+      *) echo "mccl-gpu-probe: 未知选项 $1" >&2; usage >&2; exit 2;;
+    esac
+  done
+  NO_BW_CACHE=""; [ $no_bw_cache -eq 1 ] && NO_BW_CACHE=1
+  MODE_OUT="$mode"; PROBE_OUT="$out"
+
+  load_env || { emit_error_json "环境加载失败（mccl-env.json 缺失/不在 git 仓库/python3 缺）"; exit 2; }
+
+  check_topology
+
+  FAILURES=""
+  add_failure() { FAILURES="${FAILURES}${FAILURES:+$'\n'}$1"; }
+
+  local topo_ok_v=0 bins_ok_v=1 occ_n=0
+  [ "$TOPO_OK" = "1" ] && topo_ok_v=1 || add_failure "拓扑不支持: nnodes=$MCCL_NNODES gpus=$MCCL_GPUS_PER_NODE（需 1节点 或 4/8节点×8卡）"
+
+  check_bins || { emit_error_json "bin 就绪检查 ssh 失败（NODE0 不可达或密钥未配）"; exit 2; }
+  [ "$BINS_SYM" = "1" ] && [ "$BINS_ASYM" = "1" ] && [ "$BINS_MPI" = "1" ] \
+    || { bins_ok_v=0; add_failure "bin 未就绪: sym=$BINS_SYM asym=$BINS_ASYM mpirun=$BINS_MPI"; }
+
+  check_occupancy || { emit_error_json "占用检查 ssh 失败"; exit 2; }
+  occ_n="$OCC_N"
+  [ -n "$OCC_FAILURES" ] && FAILURES="${FAILURES}${FAILURES:+$'\n'}$OCC_FAILURES"
+
+  if [ "$mode" = "full" ]; then
+    local bw_dir="${reuse_bw:-$REPO_ROOT/.gpu-probe-bw}"
+    run_bandwidth "$bw_dir" || { emit_error_json "带宽检查失败（gpu_health_check.sh 不可用或拉回报告失败）"; exit 2; }
+    [ "${BW_FAIL:-0}" -gt 0 ] 2>/dev/null && add_failure "带宽 FAIL=$BW_FAIL"
+    [ "${BW_ERROR:-0}" -gt 0 ] 2>/dev/null && add_failure "带宽 ERROR=$BW_ERROR"
+    [ "${BW_WARN:-0}" -gt 0 ] 2>/dev/null && add_failure "带宽告警 WARN=$BW_WARN（仍 READY，供人工收紧）"
+  else
+    BW_CACHED=0; BW_FAIL=0; BW_ERROR=0; BW_WARN=0; BW_REPORT=""
+  fi
+
+  local v
+  v=$(assemble_verdict "${BW_FAIL:-0}" "${BW_ERROR:-0}" "${BW_WARN:-0}" "$occ_n" "$topo_ok_v" "$bins_ok_v")
+
+  export V_VERDICT="$v" V_MODE="$MODE_OUT" V_NNODES="$MCCL_NNODES" V_GPUS="$MCCL_GPUS_PER_NODE"
+  export V_TMODE="$TOPO_MODE" V_TOPO_OK="$topo_ok_v"
+  export V_BW_FAIL="${BW_FAIL:-0}" V_BW_ERROR="${BW_ERROR:-0}" V_BW_WARN="${BW_WARN:-0}"
+  export V_BW_CACHED="${BW_CACHED:-0}" V_BW_REPORT="${BW_REPORT:-}"
+  export V_OCC_JSON="$OCC_JSON" V_HOSTS_JSON="[]" V_BINS_SYM="$BINS_SYM" V_BINS_ASYM="$BINS_ASYM" V_BINS_MPI="$BINS_MPI"
+  export V_EVIDENCE_LOGS="" V_FAILURES="$FAILURES"
+  if [ -n "$PROBE_OUT" ]; then emit_json > "$PROBE_OUT"; else emit_json; fi
+
+  case "$v" in
+    READY) exit 0;;
+    NOT_READY) exit 1;;
+    *) exit 2;;
+  esac
+}
+
+# 仅当直接执行时跑 main；被 source（单测）时不跑。
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi
