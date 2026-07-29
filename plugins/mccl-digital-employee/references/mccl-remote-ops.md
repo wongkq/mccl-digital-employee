@@ -2,7 +2,7 @@
 
 **读者**：开发agent、测试agent。执行任何远程命令（rsync/ssh/docker exec/scp/mpirun）前必读，尤其是第1、2节——引号嵌套和路径分层猜错，代价是一整轮32卡集群时间。
 
-路径统一用`$MCCL_*`变量（定义见`mccl-env.sh`，模板见`mccl-env.sh.example`）。`/opt/maca`是MetaX MACA SDK的厂商标准安装路径，作为说明性上下文出现，不代表agent应该往这个路径写东西。
+路径统一用`$MCCL_*`变量（定义见`mccl-env.json`，模板见`mccl-env.json.example`）。`/opt/maca`是MetaX MACA SDK的厂商标准安装路径，作为说明性上下文出现，不代表agent应该往这个路径写东西。
 
 ## 0. 基本形态：编译在容器内，运行在宿主机
 
@@ -14,7 +14,7 @@
 
 开关是`$MCCL_CONTAINER`：非空（如`"zb"`）=容器模式，编译等远程命令套一层`docker exec $MCCL_CONTAINER`；空字符串=无容器模式，编译直接在宿主机（`$MCCL_NODE0_IP`）shell执行，不套`docker exec`。判断方式一律：`[ -n "$MCCL_CONTAINER" ]`为真=容器模式。
 
-两种模式在文档里并列给出，不是二选一删掉；容器模式是现状（`mccl-env.sh.example`默认注释即此），无容器模式是本次新增的开关分支。远程执行的两种形态见第1节，编译命令见`references/mccl-build-pitfalls.md`第2、3节，分发见第3节。
+两种模式在文档里并列给出，不是二选一删掉；容器模式是现状（`mccl-env.json.example`默认值即此），无容器模式是本次新增的开关分支。远程执行的两种形态见第1节，编译命令见`references/mccl-build-pitfalls.md`第2、3节，分发见第3节。
 
 ## 0.5 所有 ssh/scp 必须带 `$MCCL_SSH_OPTS`（防卡死）
 
@@ -77,7 +77,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc 'export MACA_PATH=$MCCL_MACA_PA
 
 **为什么是这个引号层级，不能反过来或者少一层：**
 
-- 整条命令是**本地shell**里的一条双引号字符串，作为ssh的远程命令参数传出去。本地shell在双引号内会做变量展开——`$MCCL_NODE0_IP`、`$MCCL_CONTAINER`、`$MCCL_MACA_PATH`、`$MCCL_REMOTE_SRC`这些agent自己`source mccl-env.sh`后已知的变量，**在本地就被替换成真实值**，之后才发给ssh。
+- 整条命令是**本地shell**里的一条双引号字符串，作为ssh的远程命令参数传出去。本地shell在双引号内会做变量展开——`$MCCL_NODE0_IP`、`$MCCL_CONTAINER`、`$MCCL_MACA_PATH`、`$MCCL_REMOTE_SRC`这些agent自己加载`mccl-env.json`（eval loader）后已知的变量，**在本地就被替换成真实值**，之后才发给ssh。
 - 注意：双引号内部出现的单引号**不是嵌套引用**，只是普通字符——bash的引号规则里，单引号在双引号内没有特殊含义，不会开启二次转义层。所以`'...'`这部分不会被本地shell当成"再包一层"，变量展开照常发生在整个双引号字符串内，包括看起来在单引号里的那段。
 - 这串（此时`$MCCL_*`已替换为真实值、但单引号字符原样保留）作为一个整体，通过ssh发到`$MCCL_NODE0_IP`的**远程shell**执行。远程shell这次是真正按shell语法解析这个字符串，这时候单引号才起作用：它把`docker exec $MCCL_CONTAINER bash -c`的参数括成一个整体，交给`bash -c`当一整条命令执行——**这一层单引号是留给远程shell用的，不是留给本地shell的**。
 - 所以：**外层双引号是本地shell的，内层单引号是远程shell传给`bash -c`的**，两层各自服务不同的解析者，缺一层或次序反了，要么变量在本地展不开（远程收到字面量`$MCCL_MACA_PATH`），要么`docker exec`拿到的参数被本地shell提前拆散。
@@ -177,7 +177,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "scp <Node0上的路径> root@<目标节�
 
 这不是保守起见的建议，是`测试.md`的实际做法：分发`libmccl.so`到其余节点的三条`scp`命令（见第3节，当时是Node 1/2/3）**全部**经`$MCCL_NODE0_IP`发起，包括原文标注为可直连的那一台。附带的好处是编译产物本来就在编译节点上，从那里`scp`也最短。
 
-因此`mccl-env.sh`不需要"哪台可直连"这类变量——按上面的规则走，这个信息用不上。
+因此`mccl-env.json`不需要"哪台可直连"这类变量——按上面的规则走，这个信息用不上。
 
 ## 6. 容器内无SSH客户端 → 能力边界
 

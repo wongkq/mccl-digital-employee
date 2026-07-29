@@ -2,7 +2,7 @@
 
 MCCL（MetaX Collective Communications Library）开发验证流水线的数字员工工具包：四个agent + 三道监督卡点 + 分层重试，用来在真实MCCL仓库（`mccl_dev_supernode`）里跑一轮"改代码 → 上集群验证 → 出报告"的完整闭环，并让每一步的产出都经独立监督员审计。节点数可配置（1/4/8三档，见下方"节点数配置"一节），不同档位覆盖的验证范围不同。
 
-**本仓库只存agent定义与静态自检，不产生运行产物。** 运行产物（`.mccl-runs/`）在拷贝到真实仓库、配好`mccl-env.sh`之后才会出现。
+**本仓库只存agent定义与静态自检，不产生运行产物。** 运行产物（`.mccl-runs/`）在拷贝到真实仓库、配好`mccl-env.json`之后才会出现。
 
 ## 这是什么
 
@@ -27,7 +27,7 @@ MCCL（MetaX Collective Communications Library）开发验证流水线的数字�
 
 ## Windows 用户先看这里
 
-这套工具包全是 bash（`source`、`ssh`、`rsync`、`docker exec`、`git rev-parse`）。**纯 PowerShell 跑不了**——PowerShell 不认 `source`，agent 开工第一步 `source mccl-env.sh` 就失败，后面全塌。你需要一个 bash 环境。
+这套工具包全是 bash（`source`、`ssh`、`rsync`、`docker exec`、`git rev-parse`）。**纯 PowerShell 跑不了**——PowerShell 不认 `source`，agent 开工第一步 `eval "$(python3 mccl-env-load.py)"` 就失败，后面全塌。你需要一个 bash 环境。
 
 **Claude Code 在 Windows 上怎么选 bash：**
 
@@ -45,7 +45,7 @@ MCCL（MetaX Collective Communications Library）开发验证流水线的数字�
 wsl --install
 ```
 
-装完在 **WSL 终端里**（不是 PowerShell）装 Claude Code、启动 `claude`。之后 README 里所有命令照搬，只有 `mccl-env.sh` 里的本地源码路径要用 WSL 写法：`export MCCL_LOCAL_SRC="/mnt/d/workspace/..."`（D 盘在 WSL 里是 `/mnt/d`，Git Bash 里是 `/d`）。
+装完在 **WSL 终端里**（不是 PowerShell）装 Claude Code、启动 `claude`。之后 README 里所有命令照搬，只有 `mccl-env.json` 里的本地源码路径要用 WSL 写法：`"MCCL_LOCAL_SRC": "/mnt/d/workspace/..."`（D 盘在 WSL 里是 `/mnt/d`，Git Bash 里是 `/d`）。
 
 ### 让 AI 驱动：你只填配置 + 输一次密码
 
@@ -53,7 +53,7 @@ wsl --install
 
 | 事情 | 谁做 |
 |---|---|
-| 填 `mccl-env.sh`（节点IP、路径、容器名） | **你**，一次 |
+| 填 `mccl-env.json`（节点IP、路径、容器名） | **你**，一次 |
 | 第一次配 SSH 密钥输密码 | **你**，一条命令，一次 |
 | 配免密检查、跑测试、出报告、自检 | **AI** |
 
@@ -80,8 +80,8 @@ wsl --install
 
 # 2. 在MCCL仓库根（mccl_dev_supernode）拷配置模板并填值
 cd <你的MCCL仓库根>
-cp ~/.claude/plugins/marketplaces/mccl-digital-employee/plugins/mccl-digital-employee/mccl-env.sh.example ./mccl-env.sh
-# 编辑mccl-env.sh：填入MCCL_NODES、MCCL_CONTAINER、MCCL_MACA_PATH等18个变量的真实值
+cp ~/.claude/plugins/marketplaces/mccl-digital-employee/plugins/mccl-digital-employee/mccl-env.json.example ./mccl-env.json
+# 编辑mccl-env.json：填入MCCL_NODES、MCCL_CONTAINER、MCCL_MACA_PATH等14个raw键的真实值（loader自动派生另7个）
 
 # 3. 配好本机到编译节点的免密（<插件根> 是什么、怎么查，见紧接着的说明）
 bash <插件根>/bin/mccl-setup-ssh
@@ -93,11 +93,11 @@ claude
 /mccl-run <任务描述>
 ```
 
-**必须在MCCL仓库根目录启动claude。** 四个子代理开工第一步都是`git rev-parse --show-toplevel`锚定`REPO_ROOT`，`mccl-env.sh`、MCCL源码、`.mccl-runs/`都挂在这个根下面（`agents/mccl-developer.md`第1节、`agents/mccl-tester.md`第1节、`agents/mccl-supervisor.md`第2节口径一致）。子代理继承的是主会话启动时的工作目录，不是它自己猜的路径——虽然在仓库子目录里启动`git rev-parse --show-toplevel`也能解析出仓库根，但主控在`commands/mccl-run.md`第2节里把`RUN_DIR`拼成`$REPO_ROOT/.mccl-runs/...`并作为绝对路径传给每个子代理；如果你在别的目录启动、又手动`cd`过仓库，容易在"我以为的仓库根"和"实际解析出的仓库根"之间产生认知错位，导致你后面手动拼路径（例如下方场景化调用时）对不上。最省心的做法就是老老实实在仓库根启动。
+**必须在MCCL仓库根目录启动claude。** 四个子代理开工第一步都是`git rev-parse --show-toplevel`锚定`REPO_ROOT`，`mccl-env.json`、MCCL源码、`.mccl-runs/`都挂在这个根下面（`agents/mccl-developer.md`第1节、`agents/mccl-tester.md`第1节、`agents/mccl-supervisor.md`第2节口径一致）。子代理继承的是主会话启动时的工作目录，不是它自己猜的路径——虽然在仓库子目录里启动`git rev-parse --show-toplevel`也能解析出仓库根，但主控在`commands/mccl-run.md`第2节里把`RUN_DIR`拼成`$REPO_ROOT/.mccl-runs/...`并作为绝对路径传给每个子代理；如果你在别的目录启动、又手动`cd`过仓库，容易在"我以为的仓库根"和"实际解析出的仓库根"之间产生认知错位，导致你后面手动拼路径（例如下方场景化调用时）对不上。最省心的做法就是老老实实在仓库根启动。
 
 ### `<插件根>`是什么、怎么查
 
-README里凡是写`<插件根>`的地方（如`bash <插件根>/bin/mccl-setup-ssh`），指的都是**这套工具包的文件实际落地的那个目录**——里面有`agents/`、`commands/`、`references/`、`bin/`、`tests/`、`mccl-env.sh.example`。它不是固定值，取决于你用哪种装法，所以写成占位符：
+README里凡是写`<插件根>`的地方（如`bash <插件根>/bin/mccl-setup-ssh`），指的都是**这套工具包的文件实际落地的那个目录**——里面有`agents/`、`commands/`、`references/`、`bin/`、`tests/`、`mccl-env.json.example`。它不是固定值，取决于你用哪种装法，所以写成占位符：
 
 - **插件装法**：`~/.claude/plugins/marketplaces/<某目录>/plugins/mccl-digital-employee/`。`<某目录>`因add方式而不同，别硬记。
 - **拷贝装法**：你`git clone`到的地方，如`~/mccl-digital-employee/plugins/mccl-digital-employee/`。
@@ -114,7 +114,7 @@ find ~/.claude/plugins ~ -maxdepth 8 -name mccl-safety.md 2>/dev/null | sed 's|/
 
 ## 安装到真实仓库
 
-两种装法都支持，装完都还需要一步：在你的MCCL仓库（`mccl_dev_supernode`）里配好`mccl-env.sh`。
+两种装法都支持，装完都还需要一步：在你的MCCL仓库（`mccl_dev_supernode`）里配好`mccl-env.json`。
 
 ### 方式一：插件安装（推荐）
 
@@ -129,13 +129,13 @@ find ~/.claude/plugins ~ -maxdepth 8 -name mccl-safety.md 2>/dev/null | sed 's|/
 
 第二条的格式是`插件名@marketplace名`，本仓库两者同名，所以是`mccl-digital-employee@mccl-digital-employee`。
 
-插件装到`~/.claude/plugins/marketplaces/mccl-digital-employee/plugins/mccl-digital-employee/`，agent定义、`references/`、`bin/mccl-toolkit-root`都在插件目录下，不进你的MCCL仓库。但`mccl-env.sh`和MCCL源码只能在**你自己的仓库**里，这是插件装法下必须分清的两个根——细节见下方"双根模型"一节。
+插件装到`~/.claude/plugins/marketplaces/mccl-digital-employee/plugins/mccl-digital-employee/`，agent定义、`references/`、`bin/mccl-toolkit-root`都在插件目录下，不进你的MCCL仓库。但`mccl-env.json`和MCCL源码只能在**你自己的仓库**里，这是插件装法下必须分清的两个根——细节见下方"双根模型"一节。
 
 装完插件后，仍需在MCCL仓库根目录执行：
 
 ```bash
-cp ~/.claude/plugins/marketplaces/mccl-digital-employee/plugins/mccl-digital-employee/mccl-env.sh.example ./mccl-env.sh
-# 编辑 mccl-env.sh，填入真实的节点IP、路径、容器名等18个变量的真实值
+cp ~/.claude/plugins/marketplaces/mccl-digital-employee/plugins/mccl-digital-employee/mccl-env.json.example ./mccl-env.json
+# 编辑 mccl-env.json，填入真实的节点IP、路径、容器名等14个raw键的真实值（loader自动派生另7个）
 
 # 合并（不要覆盖）你仓库已有的 .claude/settings.json：
 #   把本仓库 .claude/settings.json 里 permissions.deny 的5条规则
@@ -145,7 +145,7 @@ cp ~/.claude/plugins/marketplaces/mccl-digital-employee/plugins/mccl-digital-emp
 
 # 追加到你仓库的 .gitignore（若已有类似条目则跳过）：
 #   .mccl-runs/
-#   mccl-env.sh
+#   mccl-env.json
 ```
 
 ### 方式二：直接拷贝到项目（老装法，仍然支持）
@@ -163,8 +163,8 @@ mkdir -p .claude/agents .claude/commands
 cp $SRC/agents/*.md    .claude/agents/
 cp $SRC/commands/*.md  .claude/commands/
 cp -r $SRC/references  .    # 含 supervisor-checklists/ 子目录，-r 会带上
-cp $SRC/mccl-env.sh.example  ./mccl-env.sh
-# 编辑 mccl-env.sh，填入真实的节点IP、路径、容器名等18个变量的真实值
+cp $SRC/mccl-env.json.example  ./mccl-env.json
+# 编辑 mccl-env.json，填入真实的节点IP、路径、容器名等14个raw键的真实值（loader自动派生另7个）
 
 # 合并（不要覆盖）真实仓库已有的 .claude/settings.json：
 #   把本仓库 .claude/settings.json 里 permissions.deny 的5条规则
@@ -174,7 +174,7 @@ cp $SRC/mccl-env.sh.example  ./mccl-env.sh
 
 # 追加到真实仓库的 .gitignore（若已有类似条目则跳过）：
 #   .mccl-runs/
-#   mccl-env.sh
+#   mccl-env.json
 ```
 
 这种装法下`references/`直接在项目里、`bin/`不在PATH，agent会自动退回`$REPO_ROOT`当`TOOLKIT_ROOT`——不需要额外配置，见下方"双根模型"。
@@ -185,8 +185,8 @@ cp $SRC/mccl-env.sh.example  ./mccl-env.sh
 
 | 根 | 怎么取 | 下面有什么 |
 |---|---|---|
-| `TOOLKIT_ROOT` | `mccl-toolkit-root`命令（插件装法下`bin/`在PATH里），取不到就退回`$REPO_ROOT` | `references/`（领域知识、监督checklist） |
-| `REPO_ROOT` | `git rev-parse --show-toplevel` | `mccl-env.sh`、MCCL源码、`.mccl-runs/` |
+| `TOOLKIT_ROOT` | `mccl-toolkit-root`命令（插件装法下`bin/`在PATH里），取不到就退回`$REPO_ROOT` | `references/`（领域知识、监督checklist）、`bin/mccl-env-load.py`（env loader） |
+| `REPO_ROOT` | `git rev-parse --show-toplevel` | `mccl-env.json`、MCCL源码、`.mccl-runs/` |
 
 插件安装时两者是不同目录（插件在`~/.claude/plugins/...`，仓库是你自己的MCCL仓库）；项目内拷贝装法下两者是同一目录，`mccl-toolkit-root`取不到时的退回逻辑保证了这种情况照样能用。
 
@@ -217,13 +217,13 @@ bash <插件根>/tests/check.sh
 
 **嫌手动麻烦可以开自动更新**：`/plugin` 打开管理器 → **Marketplaces** 标签 → 选中本 marketplace → 启用 **auto-update**。之后 claude 每次启动会在后台检查更新，有新版会提示你 `/reload-plugins`。
 
-**拷贝装法（方式二）的更新**就是普通 git：进你 clone 工具包的目录 `git pull`，再重新 `cp` 一遍到 MCCL 仓库（`agents/`、`commands/`、`references/`）。`mccl-env.sh` 是你自己填的、不会被覆盖，放心。
+**拷贝装法（方式二）的更新**就是普通 git：进你 clone 工具包的目录 `git pull`，再重新 `cp` 一遍到 MCCL 仓库（`agents/`、`commands/`、`references/`）。`mccl-env.json` 是你自己填的、不会被覆盖，放心。
 
 **看当前装的是哪个版本 / 有没有加载错误**：`/plugin` → **Installed** 标签，或 `claude plugin list`。
 
 ## 换机器 / 换节点IP
 
-IP变了只改一个文件：`mccl-env.sh`（不入库）。改完跑一次：
+IP变了只改一个文件：`mccl-env.json`（不入库）。改完跑一次：
 
 ```bash
 bash <插件>/bin/mccl-setup-ssh
@@ -252,14 +252,14 @@ bash <插件>/bin/mccl-setup-ssh
 
 ## 节点数配置
 
-改节点数只改`mccl-env.sh`一行：
+改节点数只改`mccl-env.json`两个键（空格分隔，第一个必须是编译节点）：
 
-```bash
-export MCCL_NODES="<node0-ip> <node1-ip> ..."   # 空格分隔，第一个必须是编译节点
-export MCCL_GPUS_PER_NODE=8
+```json
+"MCCL_NODES": "<node0-ip> <node1-ip> ...",
+"MCCL_GPUS_PER_NODE": 8
 ```
 
-`MCCL_NODE0_IP`、`MCCL_NNODES`、`MCCL_NP`、`MCCL_HOST_SPEC`都从这两行派生，不需要、也不应该手改（`tests/check.sh`不变式12会检查这几个派生量确实引用了`$MCCL_NODES`，防止手改成写死的值导致两处不一致）。
+`MCCL_NODE0_IP`、`MCCL_NNODES`、`MCCL_NP`、`MCCL_HOST_SPEC`都由`bin/mccl-env-load.py`从这两个键派生，不需要、也不应该手填（`tests/check.sh`不变式12会跑两个输入验证这几个派生量确实随`$MCCL_NODES`变化、非写死）。
 
 **只支持三档节点数**，因为MCCL的拓扑常量（`nNodes`/`nodeSize`/`extLsaSize`）由`devrOamNodeCount()`硬编码返回，只认OAM32（4节点）和OAM64（8节点）两种形态。但这两种形态还有一个隐含前提：`nodeSize=8`同样是硬编码值，由PCIe Switch硬件结构决定，代码里没有按`$MCCL_GPUS_PER_NODE`重新计算。所以拓扑校验同时看节点数和每节点卡数，**能测对称内存的组合只有(8卡,4节点)和(8卡,8节点)**：
 
@@ -273,14 +273,14 @@ export MCCL_GPUS_PER_NODE=8
 
 单节点模式下，`test-result.md`**必须显式声明**上表"不测什么"那一格的两点（跨节点对称内存路径未执行、`info.rank % GROUP`类bug无诊断能力）；若`$MCCL_GPUS_PER_NODE!=8`，还要额外强制声明第三条（每节点非8卡、`nodeSize=8`硬编码不匹配、节点内对称内存路径未覆盖）——这是监督员`stage=test`卡点专门核对的一条，漏了判REWORK，比测试没跑更严重（见`references/supervisor-checklists/test.md`第2、3条）。工具包的核心价值是"如实声明覆盖了什么"，节点数越少或每节点卡数越偏离8，这条声明就越重要。
 
-**本次节点数可配置化改造未覆盖的部分**：`bin/mccl-setup-ssh`（免密自检脚本）仍然硬编码检查"编译节点 → 3个其余节点"这一固定形态，只对4节点配置准确；`tests/check.sh`只验证`mccl-env.sh.example`的静态派生关系，不验证agent在真实单节点/8节点集群上的实际行为（这一点与已知限制第1条一致，本身就是本仓库的固有边界，不是本次改造新引入的）。
+**本次节点数可配置化改造未覆盖的部分**：`bin/mccl-setup-ssh`（免密自检脚本）仍然硬编码检查"编译节点 → 3个其余节点"这一固定形态，只对4节点配置准确；`tests/check.sh`只验证`mccl-env.json.example`+loader 的派生关系，不验证agent在真实单节点/8节点集群上的实际行为（这一点与已知限制第1条一致，本身就是本仓库的固有边界，不是本次改造新引入的）。
 
 ## 编译模式：容器 vs 无容器
 
-改编译模式只改`mccl-env.sh`一行：
+改编译模式只改`mccl-env.json`一个键（填容器名=容器模式；留空字符串`""`=无容器模式）：
 
-```bash
-export MCCL_CONTAINER="<container-name>"   # 填容器名=容器模式；留空（""）=无容器模式
+```json
+"MCCL_CONTAINER": "<container-name>"
 ```
 
 | `MCCL_CONTAINER` | 模式 | 编译在哪跑 | 前提 |
@@ -302,7 +302,7 @@ export MCCL_CONTAINER="<container-name>"   # 填容器名=容器模式；留空�
 /mccl-run 修复对称内存路径下info.rank越界访问ipc_input_buffer的问题
 ```
 
-主控会检查`mccl-env.sh`是否存在（不存在则停止并提示），然后创建`.mccl-runs/<YYYY-MM-DD-HHMM>/`，依次调度`mccl-developer`→`mccl-supervisor(stage=dev)`→`mccl-tester`→`mccl-supervisor(stage=test)`→`mccl-reporter`→`mccl-supervisor(stage=report)`，直到全绿产出`final-report.md`，或触发升级写出`escalation.md`（`commands/mccl-run.md`第9节）。**全绿之后不自动commit、不自动push、不自动归档到`docs/reports/`**——是否commit、commit信息怎么写，一律由人工确认后自己执行。
+主控会检查`mccl-env.json`是否存在（不存在则停止并提示），然后创建`.mccl-runs/<YYYY-MM-DD-HHMM>/`，依次调度`mccl-developer`→`mccl-supervisor(stage=dev)`→`mccl-tester`→`mccl-supervisor(stage=test)`→`mccl-reporter`→`mccl-supervisor(stage=report)`，直到全绿产出`final-report.md`，或触发升级写出`escalation.md`（`commands/mccl-run.md`第9节）。**全绿之后不自动commit、不自动push、不自动归档到`docs/reports/`**——是否commit、commit信息怎么写，一律由人工确认后自己执行。
 
 ### 只跑测试
 
@@ -395,13 +395,13 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
 | agent卡住不动、ssh没反应 | 密钥没配好，裸ssh弹密码提示，而agent背后没有人输密码 | 跑`bash <插件>/bin/mccl-setup-ssh`。所有ssh已带`$MCCL_SSH_OPTS`（`BatchMode=yes`）会立刻失败而不是挂起（`references/mccl-remote-ops.md`§0.5），若仍挂起说明有裸ssh漏网，跑`bash <插件>/tests/check.sh`第13条排查 |
 | preflight md5不一致，测试不跑（多节点模式第2条） | **最常见**。编译节点`$MCCL_MACA_LIB_DIR/libmccl.so`没更新 | 这是`测试.md`原始工作流的洞：它记载的分发只有三条scp（发给非编译节点）加编译节点容器内到`/opt/maca/lib`的cp，编译节点的`$MCCL_MACA_LIB_DIR`从没写过，且全程只有`make -j50`没有`make install`。补`references/mccl-remote-ops.md`第3节"动作②"那条命令：`ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_MACA_LIB_DIR/'"` |
 | agent说"找不到references/" | `TOOLKIT_ROOT`没解析对 | 插件装法应由`bin/mccl-toolkit-root`解析（优先`$CLAUDE_PLUGIN_ROOT`，兜底`$BASH_SOURCE`反推）；拷贝装法退回`$REPO_ROOT`。确认`references/`确实在插件根或仓库根下（`bin/mccl-toolkit-root`） |
-| 主控直接停，提示`mccl-env.sh`不存在 | 没从`.example`拷贝 | `cp <插件>/mccl-env.sh.example ./mccl-env.sh`并填值（`commands/mccl-run.md`第2节第1点） |
+| 主控直接停，提示`mccl-env.json`不存在 | 没从`.example`拷贝 | `cp <插件>/mccl-env.json.example ./mccl-env.json`并填值（`commands/mccl-run.md`第2节第1点） |
 | agent拒绝执行，说拓扑不受支持 | `MCCL_NNODES`不是1/4/8，**或**每节点卡数`MCCL_GPUS_PER_NODE`不是8而节点数是4/8（如"4节点2卡"） | 能测对称内存的组合只有 (8卡,4节点) 和 (8卡,8节点)——`nodeSize=8`是PCIe Switch硬件决定、代码硬编码的。偏离这个的多节点配置，`CliqueManager::IsSupported()`不匹配，对称内存不启用、静默fallback到Ring/Tree，**测出来的不是你以为在测的东西**，拒绝比跑更安全。单节点非8卡（如单节点2卡）是例外：能跑基础AllReduce冒烟，agent会在报告里声明未覆盖对称内存（`agents/mccl-developer.md`第6步、`agents/mccl-tester.md`第2节） |
 | 报告里写"缺失"，日志明明跑了 | 日志落在远端了 | `ssh`的重定向必须在引号**外面**：`ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<命令>" > "$RUN_DIR/build.log" 2>&1`，写成`ssh ... "<命令> > build.log 2>&1"`日志就留在远端（`references/mccl-remote-ops.md`§0.6）。`mccl-reporter`没有Bash、取不了远程文件，日志不在本地对它等同不存在 |
 | mpirun hang超5分钟 | 见`test-anomaly.md` | **禁止重启**（`references/mccl-safety.md`第3条）。agent会采`dmesg`+IB状态后停下等你（`agents/mccl-tester.md`第5节）。你也别手动重启——这条是`测试.md`原始规程里的硬禁令 |
 | 监督员判REWORK："历史产物缺失" | 前几轮的`attempt-N/`不在 | 诊断门要跨轮读`attempt-1/dev-change.md`和`attempt-2/dev-change.md`比对根因假设（`references/supervisor-checklists/dev.md`第10条）。run目录必须按轮次分子目录，不能平铺 |
 | SegFault | 已知故障模式 | 查`MCCL_P2P_LEVEL`是否与固件匹配（`agents/mccl-tester.md`第6节） |
-| UDS Connection refused | 已知故障模式 | 确认`$MCCL_MACA_PATH`的`mcMemFabricHandle_t`是1112字节版本，不是80字节旧版stub（`agents/mccl-tester.md`第6节、`mccl-env.sh.example`第41-43行） |
+| UDS Connection refused | 已知故障模式 | 确认`$MCCL_MACA_PATH`的`mcMemFabricHandle_t`是1112字节版本，不是80字节旧版stub（`agents/mccl-tester.md`第6节、`mccl-env.json.example`的 `_comments.maca_path`） |
 
 ## 各角色边界速查
 
@@ -423,7 +423,7 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
                                       插件带不走，留给用户合并进自己仓库
 plugins/mccl-digital-employee/
 ├── .claude-plugin/plugin.json       插件清单
-├── bin/mccl-toolkit-root            输出TOOLKIT_ROOT（references/所在处），两种装法都能用
+├── bin/  mccl-toolkit-root（输出TOOLKIT_ROOT）、mccl-setup-ssh（免密自检）、mccl-env-load.py（加载mccl-env.json算派生）
 ├── agents/            mccl-developer.md / mccl-tester.md / mccl-reporter.md / mccl-supervisor.md
 ├── commands/          mccl-run.md（编排入口）
 ├── references/
@@ -433,7 +433,7 @@ plugins/mccl-digital-employee/
 │   ├── mccl-remote-ops.md            远程调用模式手册（ssh跳板、docker exec引号嵌套、按$MCCL_NODES循环的分发差异）
 │   └── supervisor-checklists/
 │       ├── dev.md      test.md      report.md      三道卡点各自的监督checklist
-├── mccl-env.sh.example    18个MCCL_*环境变量模板
+├── mccl-env.json.example  14个raw键模板（_comments带说明）
 └── tests/check.sh          13条静态不变式自检（仓库级+插件级）
 docs/superpowers/{specs,plans}/      设计与实施计划
 ```
@@ -450,13 +450,13 @@ docs/superpowers/{specs,plans}/      设计与实施计划
 
 5. **`$CLAUDE_PLUGIN_ROOT`在agent提示词正文里是否会被展开，官方文档未说明、本工具包未实测。** 这不是"验证过它不work"，而是一个未知数——我们没有找到官方文档明确保证agent的Markdown提示词正文（而非仅limited于hook/MCP配置等场景）里出现的`$CLAUDE_PLUGIN_ROOT`会被harness展开成实际路径。为了不把整套双根模型建在一个不确定的行为上，`bin/mccl-toolkit-root`把`$CLAUDE_PLUGIN_ROOT`当成"如果有就优先用"的加分项，但不依赖它——真正兜底的是用`$BASH_SOURCE`反推`../`，这条路径在两种装法下都能从脚本自身的实际位置推出正确答案，不依赖任何环境变量是否被展开。这是绕开了一处不确定性，不是确认了它一定不work或一定work。
 
-6. **单节点/8节点拓扑下，agent的实际行为同样从未端到端验证过（与第1条同一根因）。** 节点数可配置化改造改的是agent提示词里的判断逻辑（按`$MCCL_NNODES`选分支）和`mccl-env.sh.example`的静态派生关系，`tests/check.sh`能验证的也仅限于派生量本身算对了（不变式12）——单节点模式下开发/测试agent会不会真的只做1份而非N+1份md5核对、拓扑不支持时会不会真的停止而不是"顺手跑一下"、覆盖度声明会不会真的写进`test-result.md`，这些都需要真实单节点或8节点集群才能验证，本仓库同样不具备。`bin/mccl-setup-ssh`目前也只对4节点配置的免密链路做了针对性检查，未随本次改造同步扩展（见上方"节点数配置"一节末尾）。
+6. **单节点/8节点拓扑下，agent的实际行为同样从未端到端验证过（与第1条同一根因）。** 节点数可配置化改造改的是agent提示词里的判断逻辑（按`$MCCL_NNODES`选分支）和`mccl-env.json.example`+`bin/mccl-env-load.py`的派生关系，`tests/check.sh`能验证的也仅限于派生量本身算对了（不变式12）——单节点模式下开发/测试agent会不会真的只做1份而非N+1份md5核对、拓扑不支持时会不会真的停止而不是"顺手跑一下"、覆盖度声明会不会真的写进`test-result.md`，这些都需要真实单节点或8节点集群才能验证，本仓库同样不具备。`bin/mccl-setup-ssh`目前也只对4节点配置的免密链路做了针对性检查，未随本次改造同步扩展（见上方"节点数配置"一节末尾）。
 
 7. **单节点模式在设计上就测不到跨节点对称内存，这不是验证缺口，是能力缺口。** `info.rank % GROUP`这类bug在单节点下**有bug的代码和修好的代码行为完全一致**：单节点时`info.rank`只有0..7、`GROUP=8`，`rank % 8 == rank`，跨节点的8+3 slot、fabric handle、`37ba549`那一行代码全都不会执行（详见上方"节点数配置"一节、`agents/mccl-tester.md`第2a节）。工具包会强制在`test-result.md`里声明这两点未覆盖（`references/supervisor-checklists/test.md`第3条，漏了判REWORK），但你要清楚这个声明的含义：单节点跑通不代表跨节点对称内存路径没问题。
 
 ## `测试.md`不入库
 
-`测试.md`是私有参考资料（真实环境的调试记录、内网IP、主机映射等），永远不进入本仓库的git历史，已在`.gitignore`中拦截。`references/`下的四份领域知识文档是从`测试.md`提炼出的技术知识（编译陷阱、硬禁令、远程调用模式、对称内存等领域概念），环境相关的具体值统一收敛到`mccl-env.sh`（不入库，只提交`mccl-env.sh.example`模板）。
+`测试.md`是私有参考资料（真实环境的调试记录、内网IP、主机映射等），永远不进入本仓库的git历史，已在`.gitignore`中拦截。`references/`下的四份领域知识文档是从`测试.md`提炼出的技术知识（编译陷阱、硬禁令、远程调用模式、对称内存等领域概念），环境相关的具体值统一收敛到`mccl-env.json`（不入库，只提交`mccl-env.json.example`模板）。
 
 **这条边界只有一部分是自动校验的，其余靠人工把关**——说清楚哪部分是哪部分，比笼统说"已校验"有用：
 
@@ -464,7 +464,7 @@ docs/superpowers/{specs,plans}/      设计与实施计划
 |---|---|
 | 内网IP字面量 | `tests/check.sh`不变式3自动校验（已跟踪文件grep私网IP段） |
 | `测试.md`本身不入库 | 不变式1（不在git历史）、不变式2（被`.gitignore`拦截）自动校验 |
-| `mccl-env.sh`不入库 | 不变式4自动校验 |
+| `mccl-env.json`不入库 | 不变式4自动校验 |
 | 主机名/末位八位组映射（如`Host3=<末位八位组>`） | **无自动校验**，靠review。写进已跟踪文件，`check.sh`照样全绿 |
 | 真实文件系统路径 | **无自动校验**，且`references/`里**确实含**真实路径 |
 

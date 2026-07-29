@@ -2,7 +2,7 @@
 # MCCL数字员工工具包自检。每次commit前跑：bash plugins/mccl-digital-employee/tests/check.sh
 # 只验证静态不变式。agent的实际行为需拷入真实仓库后验证。
 #
-# 双根：仓库级检查（#1-5）用 REPO_ROOT（git仓库根，测试.md/mccl-env.sh/settings.json所在处）；
+# 双根：仓库级检查（#1-5）用 REPO_ROOT（git仓库根，测试.md/mccl-env.json/settings.json所在处）；
 # 插件级检查（#6-12）用 PLUGIN_ROOT（本脚本所在插件的根，agents/references/所在处）。
 # 两者在marketplace布局下不是同一目录，混用会查错地方。
 set -uo pipefail
@@ -40,11 +40,11 @@ else
   ok "已跟踪文件无私网IP字面量"
 fi
 
-# --- 4. mccl-env.sh 不得被跟踪 ---
-if git -C "$REPO_ROOT" ls-files --error-unmatch mccl-env.sh >/dev/null 2>&1; then
-  err "mccl-env.sh 被跟踪（含内网信息，应只提交 .example）"
+# --- 4. mccl-env.json 不得被跟踪 ---
+if git -C "$REPO_ROOT" ls-files --error-unmatch mccl-env.json >/dev/null 2>&1; then
+  err "mccl-env.json 被跟踪（含内网信息，应只提交 .example）"
 else
-  ok "mccl-env.sh 未被跟踪"
+  ok "mccl-env.json 未被跟踪"
 fi
 
 # --- 5. settings.json 合法且含关键 deny 规则 ---
@@ -86,16 +86,24 @@ for f in "$PLUGIN_ROOT"/agents/*.md; do
 done
 ok "agent frontmatter 检查完成"
 
-# --- 7. agent 引用的 MCCL_ 变量都在 mccl-env.sh.example 中定义 ---
-undef=""
-for v in $(grep -rhoE '\$\{?MCCL_[A-Z0-9_]+' "$PLUGIN_ROOT/agents/" "$PLUGIN_ROOT/commands/" "$PLUGIN_ROOT/references/" "$PLUGIN_ROOT/bin/" 2>/dev/null \
-           | sed 's/[${]//g' | sort -u); do
-  grep -q "^export ${v}=" "$PLUGIN_ROOT/mccl-env.sh.example" || undef="$undef $v"
-done
-if [ -n "$undef" ]; then
-  err "引用了未在 mccl-env.sh.example 中定义的变量：$undef"
+# --- 7. agent 引用的 MCCL_ 变量都在 mccl-env.json.example + loader 派生集合中 ---
+example_json="$PLUGIN_ROOT/mccl-env.json.example"
+loader="$PLUGIN_ROOT/bin/mccl-env-load.py"
+if [ ! -f "$example_json" ] || [ ! -f "$loader" ]; then
+  err "缺 $example_json 或 $loader，无法校验引用闭合"
 else
-  ok "环境变量引用闭合"
+  # loader --keys 对 example 跑一次，拿到全部变量名（raw 14 + derived 7）
+  all_keys="$(python3 "$loader" "$example_json" --keys 2>/dev/null | sort -u)"
+  undef=""
+  for v in $(grep -rhoE '\$\{?MCCL_[A-Z0-9_]+' "$PLUGIN_ROOT/agents/" "$PLUGIN_ROOT/commands/" "$PLUGIN_ROOT/references/" "$PLUGIN_ROOT/bin/" 2>/dev/null \
+             | sed 's/[${]//g' | sort -u); do
+    echo "$all_keys" | grep -qx "$v" || undef="$undef $v"
+  done
+  if [ -n "$undef" ]; then
+    err "引用了未在 mccl-env.json.example/loader 中定义的变量：$undef"
+  else
+    ok "环境变量引用闭合（raw + derived）"
+  fi
 fi
 
 # --- 8. mccl-reporter 不得拥有 Bash（防报告造假的物理隔离）---
@@ -143,31 +151,41 @@ else
   fi
 fi
 
-# --- 12. mccl-env.sh.example 里节点派生量确实从 $MCCL_NODES 派生，不是写死的值 ---
-example="$PLUGIN_ROOT/mccl-env.sh.example"
-if [ ! -f "$example" ]; then
-  err "$example 缺失"
+# --- 12. loader 的节点派生量确实从 MCCL_NODES 派生（跑两个输入验证非写死）---
+# 原 .sh 时代靠 grep 派生行引用上游；改 JSON+loader 后派生在 Python 里，
+# 改用"跑 loader 对两个不同输入，看派生量是否随输入正确变化"来证明非写死。
+example_json="$PLUGIN_ROOT/mccl-env.json.example"
+loader="$PLUGIN_ROOT/bin/mccl-env-load.py"
+if [ ! -f "$loader" ] || [ ! -f "$example_json" ]; then
+  err "loader 或 mccl-env.json.example 缺失，无法校验派生"
 else
-  # 每个派生量必须引用的上游变量：MCCL_NP 是从 MCCL_NNODES 算出来的（间接派生自
-  # MCCL_NODES），其余三个直接引用 MCCL_NODES。
+  # 用 example 作底，覆盖 NODES/GPUS 造两份临时 json（其余键用占位值即可，派生只看 NODES/GPUS）
+  both="$(python3 - "$example_json" <<'PY'
+import json, sys, os, tempfile
+ex = json.load(open(sys.argv[1]))
+base = {k: v for k, v in ex.items() if k.startswith("MCCL_")}
+def mk(nodes, gpus):
+    d = dict(base); d["MCCL_NODES"] = nodes; d["MCCL_GPUS_PER_NODE"] = gpus
+    fd, p = tempfile.mkstemp(suffix=".json"); os.write(fd, json.dumps(d).encode()); os.close(fd)
+    return p
+print(mk("1.1.1.1 2.2.2.2 3.3.3.3 4.4.4.4", 8), mk("9.9.9.9", 1))
+PY
+)"
+  j4="${both%% *}"; j1="${both##* }"
   derive_bad=""
-  check_derive() {
-    v="$1"; upstream="$2"
-    line=$(grep "^export ${v}=" "$example" || true)
-    if [ -z "$line" ]; then
-      derive_bad="$derive_bad ${v}(未定义)"
-    elif ! echo "$line" | grep -q "$upstream"; then
-      derive_bad="$derive_bad ${v}(未引用\$${upstream}，疑似写死)"
-    fi
-  }
-  check_derive MCCL_NODE0_IP MCCL_NODES
-  check_derive MCCL_NNODES MCCL_NODES
-  check_derive MCCL_NP MCCL_NNODES
-  check_derive MCCL_HOST_SPEC MCCL_NODES
+  eval "$(python3 "$loader" "$j4")"
+  [ "${MCCL_NNODES:-}" = 4 ] && [ "${MCCL_NP:-}" = 32 ] && [ "${MCCL_NODE0_IP:-}" = "1.1.1.1" ] \
+    && [ "${MCCL_HOST_SPEC:-}" = "1.1.1.1:8,2.2.2.2:8,3.3.3.3:8,4.4.4.4:8" ] \
+    || derive_bad="$derive_bad 4节点输入派生错(NNODES=${MCCL_NNODES:-?} NP=${MCCL_NP:-?} NODE0=${MCCL_NODE0_IP:-?} HOST_SPEC=${MCCL_HOST_SPEC:-?})"
+  eval "$(python3 "$loader" "$j1")"
+  [ "${MCCL_NNODES:-}" = 1 ] && [ "${MCCL_NP:-}" = 1 ] && [ "${MCCL_NODE0_IP:-}" = "9.9.9.9" ] \
+    && [ "${MCCL_HOST_SPEC:-}" = "9.9.9.9:1" ] \
+    || derive_bad="$derive_bad 1节点输入派生错(NNODES=${MCCL_NNODES:-?} NP=${MCCL_NP:-?} NODE0=${MCCL_NODE0_IP:-?} HOST_SPEC=${MCCL_HOST_SPEC:-?})"
+  rm -f "$j4" "$j1"
   if [ -n "$derive_bad" ]; then
-    err "mccl-env.sh.example 节点派生量有问题：$derive_bad"
+    err "loader 节点派生量有问题：$derive_bad"
   else
-    ok "mccl-env.sh.example 节点派生量（NODE0_IP/NNODES/NP/HOST_SPEC）均从\$MCCL_NODES派生"
+    ok "loader 节点派生量（NODE0_IP/NNODES/NP/HOST_SPEC）随输入变化、非写死"
   fi
 fi
 

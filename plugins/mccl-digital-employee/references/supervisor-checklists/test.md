@@ -10,7 +10,7 @@ stage=test时使用。产物来源：`test-preflight.md`、`test-asymmetric.log`
 
 ## 2. 场景A是否跑了（`test-asymmetric.log`存在且非空）→ 否则REWORK
 
-**先核实`$MCCL_NNODES`（读`mccl-env.sh`或run目录里能核实到的值），本条与第3条只适用于多节点模式（`$MCCL_NNODES=4`或`8`）。** 单节点模式（`$MCCL_NNODES=1`）不产出场景A/B日志，改判见本条末尾的"单节点模式"分支，不得因为没有`test-asymmetric.log`就机械判REWORK。
+**先核实`$MCCL_NNODES`（读`mccl-env.json`或run目录里能核实到的值），本条与第3条只适用于多节点模式（`$MCCL_NNODES=4`或`8`）。** 单节点模式（`$MCCL_NNODES=1`）不产出场景A/B日志，改判见本条末尾的"单节点模式"分支，不得因为没有`test-asymmetric.log`就机械判REWORK。
 
 多节点模式下，怎么查：用Bash确认run目录下`test-asymmetric.log`存在，且文件非空（`wc -l`或文件大小大于0，且内容不是仅有一行占位文字）。场景A是回归保护，不是可选项——即使`dev-change.md`只提到对称内存改动，本项检查同样适用，不因改动范围而豁免。
 
@@ -29,7 +29,7 @@ stage=test时使用。产物来源：`test-preflight.md`、`test-asymmetric.log`
 
 **这条是本次拓扑可配置化改造的要害，比日志本身是否存在更重要**——漏了覆盖度声明，比测试没跑更危险：一份"跑通了、有perf数据"但没声明覆盖边界的`test-result.md`，会让人误以为对称内存的跨节点路径已经验证过。只要`test-preflight.md`/`test-result.md`任一处显示`$MCCL_NNODES=1`却对这两点只字不提或表述含糊（例如笼统写"本次为单节点测试"而不点名具体未覆盖的路径和bug类型），判REWORK，不得因为日志本身完整、perf数据齐全就放行。
 
-## 4. 测试命令是否与`mccl-env.sh`定义一致 → 否则REWORK
+## 4. 测试命令是否与`mccl-env.json`定义一致 → 否则REWORK
 
 **多节点模式**（`-np`、`-host`各节点`:8`、`btl_tcp_if_include`、三个`-x`环境变量）：
 

@@ -22,7 +22,7 @@ stage=dev时使用。产物来源：`change.patch`、`dev-change.md`、`build.lo
 
 ## 5. 是否在编译节点之外的节点上编译或改源码 → **ABORT**
 
-怎么查：读`mccl-env.sh`（或run目录里能核实到的`$MCCL_NODES`值），取除第一个（编译节点，`$MCCL_NODE0_IP`）之外的每个IP，在`build.log`中grep这些IP，确认它们只出现在分发（scp/cp目标）上下文里，不出现在`make`、`docker exec ... bash -c`（容器模式）或`bash -lc`（无容器模式）编译命令的上下文里。
+怎么查：读`mccl-env.json`（或run目录里能核实到的`$MCCL_NODES`值），取除第一个（编译节点，`$MCCL_NODE0_IP`）之外的每个IP，在`build.log`中grep这些IP，确认它们只出现在分发（scp/cp目标）上下文里，不出现在`make`、`docker exec ... bash -c`（容器模式）或`bash -lc`（无容器模式）编译命令的上下文里。
 
 ## 6. `build.log`中`MACA_PATH`是否为`$MCCL_MACA_PATH` → 否则REWORK
 
@@ -69,7 +69,7 @@ stage=dev时使用。产物来源：`change.patch`、`dev-change.md`、`build.lo
 
 ## 11. `libmccl.so`是否已分发到全部节点 → 否则REWORK
 
-怎么查：先核实`$MCCL_NNODES`的值（读`mccl-env.sh`或run目录里能核实到的值）。`dev-change.md`"编译结果"字段必须列出对应份数的具体md5值：
+怎么查：先核实`$MCCL_NNODES`的值（读`mccl-env.json`或run目录里能核实到的值）。`dev-change.md`"编译结果"字段必须列出对应份数的具体md5值：
 
 - 多节点模式（`$MCCL_NNODES=4`或`8`）：**`$MCCL_NNODES + 1`个**——构建产物本身（`$MCCL_NODE0_IP`上`$MCCL_REMOTE_SRC/build/libmccl.so`，容器模式在容器内、无容器模式在宿主机）＋`$MCCL_NNODES`个节点（**含编译节点**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（即`$MCCL_LD_LIBRARY_PATH`的库目录部分，容器模式下**不是容器内`$MCCL_VENDOR_MACA_PATH/lib`那份**，两者同名不同层，见`references/mccl-remote-ops.md`第2节）。
 - 单节点模式（`$MCCL_NNODES=1`）：**2个**——构建产物本身 ＋ 第二份。容器模式下第二份是容器内`$MCCL_VENDOR_MACA_PATH/lib/libmccl.so`（第3节动作①产生），此时不要求`$MCCL_MACA_LIB_DIR`那份（那是给跨节点宿主机mpirun用的，单节点模式用不上）；无容器模式下动作①②已合并，第二份就是宿主机`$MCCL_MACA_LIB_DIR/libmccl.so`（直接`cp`产生）。不得因为"只列了2个"就判REWORK。
@@ -86,7 +86,7 @@ stage=dev时使用。产物来源：`change.patch`、`dev-change.md`、`build.lo
 
 ## 12. 拓扑合法性：`$MCCL_NNODES`与`$MCCL_GPUS_PER_NODE`的组合不属于S且不是单节点冒烟时，是否停止并上报 → 否则**ABORT**
 
-怎么查：核实`$MCCL_NNODES`与`$MCCL_GPUS_PER_NODE`的值（读`mccl-env.sh`或run目录里能核实到的值）。定义对称内存标准拓扑`S = ($MCCL_GPUS_PER_NODE==8 且 $MCCL_NNODES∈{4,8})`。若`$MCCL_NNODES==1`（单节点冒烟，任意卡数），本条不触发。否则（`$MCCL_NNODES∈{4,8}`但`$MCCL_GPUS_PER_NODE!=8`，或`$MCCL_NNODES`不是1/4/8）：
+怎么查：核实`$MCCL_NNODES`与`$MCCL_GPUS_PER_NODE`的值（读`mccl-env.json`或run目录里能核实到的值）。定义对称内存标准拓扑`S = ($MCCL_GPUS_PER_NODE==8 且 $MCCL_NNODES∈{4,8})`。若`$MCCL_NNODES==1`（单节点冒烟，任意卡数），本条不触发。否则（`$MCCL_NNODES∈{4,8}`但`$MCCL_GPUS_PER_NODE!=8`，或`$MCCL_NNODES`不是1/4/8）：
 
 - 检查`change.patch`是否为空、`build.log`是否不存在或不含实际编译记录、`dev-change.md`是否记录了"`$MCCL_NNODES`/`$MCCL_GPUS_PER_NODE`不支持，已上报"这类内容而非正常的七字段交付。
 - 若开发子代理在拓扑不支持的情况下仍然改了代码、编译、分发了`libmccl.so`（**含`$MCCL_NNODES∈{4,8}`但`$MCCL_GPUS_PER_NODE!=8`却改代码/编译/分发的情况**），视为闷头跑了不该跑的流程——**直接ABORT**，不给REWORK的机会。理由：MCCL只硬编码OAM32/OAM64两种拓扑（`nodeSize=8`由PCIe Switch硬件决定、代码写死），`$MCCL_NNODES`为2/3/5等值、或`$MCCL_NNODES∈{4,8}`但每节点卡数不是8时，对称内存路径不会启用、会静默fallback到Ring/Tree，在这种拓扑下产出的编译与分发结果，后续测试验证不到真正要验证的路径——闷头跑完比停下上报更有害，因为会产生一份看起来正常的交付。

@@ -14,9 +14,9 @@ tools: Read, Edit, Write, Grep, Glob, Bash
 
 ```bash
 REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT"
-source "$REPO_ROOT/mccl-env.sh"
 TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 [ -f "$TOOLKIT_ROOT/references/mccl-safety.md" ] || { echo "找不到references/，TOOLKIT_ROOT=$TOOLKIT_ROOT"; exit 1; }
+eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 ```
 
 这是两个不同的根，不能混用：
@@ -24,16 +24,16 @@ TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 | 根 | 下面有什么 |
 |---|---|
 | `TOOLKIT_ROOT` | `references/`（领域知识、监督checklist） |
-| `REPO_ROOT` | `mccl-env.sh`、MCCL源码、`.mccl-runs/` |
+| `REPO_ROOT` | `mccl-env.json`、MCCL源码、`.mccl-runs/` |
 
-**不要假设你的当前目录就是仓库根。**你继承的是主会话启动时的工作目录——用户可能在仓库的任意子目录里启动了Claude Code。`references/...`一律拼`$TOOLKIT_ROOT/`；`mccl-env.sh`、源码、run目录一律拼`$REPO_ROOT/`。用Read工具读`references/`时必须用绝对路径`$TOOLKIT_ROOT/references/...`。
+**不要假设你的当前目录就是仓库根。**你继承的是主会话启动时的工作目录——用户可能在仓库的任意子目录里启动了Claude Code。`references/...`一律拼`$TOOLKIT_ROOT/`；`mccl-env.json`、源码、run目录一律拼`$REPO_ROOT/`。用Read工具读`references/`时必须用绝对路径`$TOOLKIT_ROOT/references/...`。
 
 任一根解析失败（`git rev-parse`失败说明不在git仓库里；上面的`references/mccl-safety.md`校验失败说明`TOOLKIT_ROOT`没找对）都说明工具包没装对位置，**停止并上报，不要猜路径**。
 2. 读`$TOOLKIT_ROOT/references/mccl-safety.md`（硬禁令，8条，违反ABORT或REWORK）。
 3. 读`$TOOLKIT_ROOT/references/mccl-build-pitfalls.md`（编译陷阱，尤其第2条macaify增量编译坑）。
 4. 读`$TOOLKIT_ROOT/references/mccl-remote-ops.md`（远程调用模式：ssh+docker exec引号嵌套、`/opt/maca/lib`双重身份、4节点分发方式差异）。执行任何ssh/rsync/docker exec/scp命令前，先确认命令形态与该文档一致，不要凭感觉拼引号。
 5. 若本次任务涉及对称内存（symmetric memory）、FC kernel、`dev_runtime.cc`、`clique/`目录，额外读`$TOOLKIT_ROOT/references/mccl-domain.md`。
-6. **拓扑合法性校验**：`source mccl-env.sh`之后得到`$MCCL_NNODES`（从`$MCCL_NODES`派生）与`$MCCL_GPUS_PER_NODE`。MCCL的拓扑常量硬编码，`nodeSize=8`由PCIe Switch硬件结构决定、代码里直接写死（见`$TOOLKIT_ROOT/references/mccl-domain.md`第14行），只支持OAM32（4节点×8卡）和OAM64（8节点×8卡）；单节点（1节点，任意卡数）是本工具包额外支持的冒烟模式。判定标准同时看`$MCCL_NNODES`和`$MCCL_GPUS_PER_NODE`：
+6. **拓扑合法性校验**：加载`mccl-env.json`之后得到`$MCCL_NNODES`（从`$MCCL_NODES`派生）与`$MCCL_GPUS_PER_NODE`。MCCL的拓扑常量硬编码，`nodeSize=8`由PCIe Switch硬件结构决定、代码里直接写死（见`$TOOLKIT_ROOT/references/mccl-domain.md`第14行），只支持OAM32（4节点×8卡）和OAM64（8节点×8卡）；单节点（1节点，任意卡数）是本工具包额外支持的冒烟模式。判定标准同时看`$MCCL_NNODES`和`$MCCL_GPUS_PER_NODE`：
 
    | `$MCCL_NNODES` | `$MCCL_GPUS_PER_NODE` | 含义 | 怎么做 |
    |---|---|---|---|

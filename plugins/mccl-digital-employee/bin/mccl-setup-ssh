@@ -11,16 +11,17 @@ set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   echo "错误：不在git仓库里。请在MCCL仓库根目录运行。" >&2; exit 1; }
-ENV_FILE="$REPO_ROOT/mccl-env.sh"
-[ -f "$ENV_FILE" ] || {
-  echo "错误：找不到 $ENV_FILE" >&2
-  echo "请先： cp <插件>/mccl-env.sh.example $ENV_FILE  然后填入真实值" >&2; exit 1; }
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+ENV_JSON="$REPO_ROOT/mccl-env.json"
+[ -f "$ENV_JSON" ] || {
+  echo "错误：找不到 $ENV_JSON" >&2
+  echo "请先： cp <插件>/mccl-env.json.example $ENV_JSON  然后填入真实值" >&2; exit 1; }
 # shellcheck disable=SC1090
-source "$ENV_FILE"
+eval "$(python3 "$SELF_DIR/mccl-env-load.py" "$ENV_JSON")"
 
-: "${MCCL_NODES:?mccl-env.sh 里缺 MCCL_NODES}"
-: "${MCCL_NODE0_IP:?mccl-env.sh 里缺 MCCL_NODE0_IP（应由 MCCL_NODES 派生）}"
-: "${MCCL_NNODES:?mccl-env.sh 里缺 MCCL_NNODES（应由 MCCL_NODES 派生）}"
+: "${MCCL_NODES:?mccl-env.json 里缺 MCCL_NODES}"
+: "${MCCL_NODE0_IP:?mccl-env.json 里缺 MCCL_NODE0_IP（应由 MCCL_NODES 派生）}"
+: "${MCCL_NNODES:?mccl-env.json 里缺 MCCL_NNODES（应由 MCCL_NODES 派生）}"
 
 # 除编译节点外的其余节点（单节点时为空）
 PEERS="$(echo "$MCCL_NODES" | cut -d' ' -f2-)"
@@ -53,7 +54,7 @@ else
     *)
       echo "   连不上 $MCCL_NODE0_IP，不是密钥的问题：" >&2
       echo "     $probe" >&2
-      echo "   先确认IP对不对（mccl-env.sh 的 MCCL_NODES）、网络通不通、SSH服务在不在。" >&2
+      echo "   先确认IP对不对（mccl-env.json 的 MCCL_NODES）、网络通不通、SSH服务在不在。" >&2
       echo "   主机都不可达时配密钥没有意义，这里直接停，不进入密码提示。" >&2
       exit 1 ;;
   esac

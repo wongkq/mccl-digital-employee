@@ -2,7 +2,7 @@
 
 **读者**：开发agent。执行编译步骤前必读，尤其是改完代码却发现"改了跟没改一样"时先看第2条。
 
-路径统一用`$MCCL_*`变量（定义见`mccl-env.sh`，模板见`mccl-env.sh.example`）。`/opt/maca`是MetaX MACA SDK的厂商标准安装路径，作为说明性上下文出现，不代表agent应该往这个路径写东西。
+路径统一用`$MCCL_*`变量（定义见`mccl-env.json`，模板见`mccl-env.json.example`）。`/opt/maca`是MetaX MACA SDK的厂商标准安装路径，作为说明性上下文出现，不代表agent应该往这个路径写东西。
 
 ## 1. `MACA_PATH`两个版本，选错会导致跨节点句柄异常
 

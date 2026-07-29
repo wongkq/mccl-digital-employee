@@ -52,9 +52,9 @@ REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT"
 
 你继承的是用户启动Claude Code时的工作目录，**不一定是仓库根**。`git rev-parse`失败就停止并提示"请在MCCL仓库内运行"。
 
-1. 检查`$REPO_ROOT/mccl-env.sh`是否存在。**不存在则停止**，提示用户：`mccl-env.sh 不存在，请先 cp mccl-env.sh.example mccl-env.sh 并填入真实值后再运行 /mccl-run`。不得跳过这一步继续往下走。存在则`source "$REPO_ROOT/mccl-env.sh"`。
+1. 解析`TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"`，确认`$TOOLKIT_ROOT/references/mccl-safety.md`存在，然后加载环境：`eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"`。**若 `mccl-env.json` 不存在或缺必需键，loader 会报错退出**——此时停止，提示用户：`mccl-env.json 不存在或未填全，请先 cp <插件>/mccl-env.json.example ./mccl-env.json 并填入真实值后再运行 /mccl-run`。不得跳过这一步继续往下走。
 
-   接着解析`TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"`，并确认`$TOOLKIT_ROOT/references/mccl-safety.md`存在——四个子代理各自开工时都要独立解析这同一个`TOOLKIT_ROOT`并读取`references/`，此处提前校验一次是为了在拉起任何子代理之前就快速失败，不必等到developer子代理内部才发现装错了位置。这两个根不能混用：`TOOLKIT_ROOT`下是`references/`，`REPO_ROOT`下是`mccl-env.sh`、MCCL源码、`.mccl-runs/`。
+   接着解析`TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"`，并确认`$TOOLKIT_ROOT/references/mccl-safety.md`存在——四个子代理各自开工时都要独立解析这同一个`TOOLKIT_ROOT`并读取`references/`，此处提前校验一次是为了在拉起任何子代理之前就快速失败，不必等到developer子代理内部才发现装错了位置。这两个根不能混用：`TOOLKIT_ROOT`下是`references/`与`bin/mccl-env-load.py`，`REPO_ROOT`下是`mccl-env.json`、MCCL源码、`.mccl-runs/`。
 
    run目录用绝对路径：`RUN_DIR="$REPO_ROOT/.mccl-runs/$(date +%Y-%m-%d-%H%M)"`。**你传给每个子代理的路径必须是绝对路径**——子代理和你一样继承主会话CWD，给相对路径它们会解析到别处去。
 2. `mkdir -p "$RUN_DIR"`。

@@ -29,6 +29,7 @@ tools: Read, Grep, Glob, Bash
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 [ -f "$TOOLKIT_ROOT/references/mccl-safety.md" ] || { echo "找不到references/，TOOLKIT_ROOT=$TOOLKIT_ROOT"; exit 1; }
+eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 ```
 
 这是两个不同的根，不能混用：
@@ -36,7 +37,7 @@ TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 | 根 | 下面有什么 |
 |---|---|
 | `TOOLKIT_ROOT` | `references/`（领域知识、监督checklist） |
-| `REPO_ROOT` | `mccl-env.sh`、MCCL源码、`.mccl-runs/` |
+| `REPO_ROOT` | `mccl-env.json`、MCCL源码、`.mccl-runs/` |
 
 **不要假设你的当前目录就是仓库根**——你继承的是主会话启动时的工作目录，用户可能在仓库任意子目录里启动了Claude Code。下文所有`references/...`路径都相对`$TOOLKIT_ROOT`，读的时候拼成绝对路径`$TOOLKIT_ROOT/references/...`。任一根解析失败（`git rev-parse`失败，或上面`references/mccl-safety.md`校验失败）说明工具包没装对位置，**停止并上报，不要猜路径**。
 

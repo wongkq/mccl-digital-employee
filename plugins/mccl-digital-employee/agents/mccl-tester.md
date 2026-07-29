@@ -14,9 +14,9 @@ tools: Read, Write, Grep, Glob, Bash
 
 ```bash
 REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT"
-source "$REPO_ROOT/mccl-env.sh"
 TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 [ -f "$TOOLKIT_ROOT/references/mccl-safety.md" ] || { echo "找不到references/，TOOLKIT_ROOT=$TOOLKIT_ROOT"; exit 1; }
+eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 ```
 
 这是两个不同的根，不能混用：
@@ -24,9 +24,9 @@ TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 | 根 | 下面有什么 |
 |---|---|
 | `TOOLKIT_ROOT` | `references/`（领域知识、监督checklist） |
-| `REPO_ROOT` | `mccl-env.sh`、MCCL源码、`.mccl-runs/` |
+| `REPO_ROOT` | `mccl-env.json`、MCCL源码、`.mccl-runs/` |
 
-**不要假设你的当前目录就是仓库根。**你继承的是主会话启动时的工作目录——用户可能在仓库的任意子目录里启动了Claude Code。`references/...`一律拼`$TOOLKIT_ROOT/`；`mccl-env.sh`、源码、run目录一律拼`$REPO_ROOT/`。用Read工具读`references/`时必须用绝对路径`$TOOLKIT_ROOT/references/...`。
+**不要假设你的当前目录就是仓库根。**你继承的是主会话启动时的工作目录——用户可能在仓库的任意子目录里启动了Claude Code。`references/...`一律拼`$TOOLKIT_ROOT/`；`mccl-env.json`、源码、run目录一律拼`$REPO_ROOT/`。用Read工具读`references/`时必须用绝对路径`$TOOLKIT_ROOT/references/...`。
 
 任一根解析失败（`git rev-parse`失败说明不在git仓库里；上面的`references/mccl-safety.md`校验失败说明`TOOLKIT_ROOT`没找对）都说明工具包没装对位置，**停止并上报，不要猜路径**。
 2. 读`$TOOLKIT_ROOT/references/mccl-safety.md`（硬禁令，违反ABORT或REWORK；第3条"禁止重启远程节点"是本轮最容易踩的一条，见第6节）。
@@ -35,7 +35,7 @@ TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 
 ## 2. 拓扑合法性校验与场景选择
 
-`source mccl-env.sh`之后，`$MCCL_NNODES`是从`$MCCL_NODES`派生的节点数，`$MCCL_GPUS_PER_NODE`是每节点卡数。MCCL的拓扑常量是硬编码的，`nodeSize=8`由PCIe Switch硬件结构决定、代码里直接写死（见`$TOOLKIT_ROOT/references/mccl-domain.md`第14行），只支持OAM32（4节点×8卡）和OAM64（8节点×8卡）两种；单节点（任意卡数）是本工具包额外支持的冒烟模式。判定同时看`$MCCL_NNODES`和`$MCCL_GPUS_PER_NODE`：
+加载`mccl-env.json`之后，`$MCCL_NNODES`是从`$MCCL_NODES`派生的节点数，`$MCCL_GPUS_PER_NODE`是每节点卡数。MCCL的拓扑常量是硬编码的，`nodeSize=8`由PCIe Switch硬件结构决定、代码里直接写死（见`$TOOLKIT_ROOT/references/mccl-domain.md`第14行），只支持OAM32（4节点×8卡）和OAM64（8节点×8卡）两种；单节点（任意卡数）是本工具包额外支持的冒烟模式。判定同时看`$MCCL_NNODES`和`$MCCL_GPUS_PER_NODE`：
 
 | `$MCCL_NNODES` | `$MCCL_GPUS_PER_NODE` | 含义 | 怎么做 |
 |---|---|---|---|
@@ -79,7 +79,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc 'mpirun --allow-run-as-root --m
 
 场景A是回归保护，**不是可选项**。对称内存改动会碰到`registerSymetricBuffers`、`updateFcKernelCommonArgs`等两条路径共用的host代码，省掉场景A等于放弃回归保护——即使本轮任务描述只提到"对称内存"改动，也照样两个场景都跑。任何一个场景因故未跑，`test-result.md`里必须明确写"未跑"及原因，不得只字不提。
 
-`-np`用`$MCCL_NP`（4节点=32，8节点=64），`-host`用`$MCCL_HOST_SPEC`（随节点数自动展开），两者都已在`mccl-env.sh`里从`$MCCL_NODES`派生好，不需要按节点数手改命令。
+`-np`用`$MCCL_NP`（4节点=32，8节点=64），`-host`用`$MCCL_HOST_SPEC`（随节点数自动展开），两者都已在`mccl-env.json`里（经 loader）从`$MCCL_NODES`派生好，不需要按节点数手改命令。
 
 ## 3. mpirun命令（多节点模式）
 
