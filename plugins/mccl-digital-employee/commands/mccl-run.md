@@ -13,14 +13,14 @@ description: 跑一轮完整的MCCL开发验证流水线：开发→监督→测
 - 不得自己写`dev-change.md`/`test-result.md`/`report-N.md`——那是对应子代理的活。
 - 不得自己下verdict（PASS/REWORK/ABORT的判断权只属于`mccl-supervisor`）——你只能`head -1`读它写的结论，不能替它判。
 
-调度四个子代理一律用你所在harness的子代理调度工具（视版本叫`Task`或`Agent`，认能力不认名字），`subagent_type`填对应agent名：`mccl-developer`、`mccl-tester`、`mccl-reporter`、`mccl-supervisor`。每次调用的`prompt`里必须写清楚：本轮要读哪些文件（绝对路径）、本轮产物写到哪个目录（绝对路径）。子代理各自的定义文件（`.claude/agents/*.md`）里"run目录"是抽象说法，具体指向哪个路径由你在prompt里明确给出——不给具体路径，子代理没有办法知道该往哪写。
+调度五个子代理一律用你所在harness的子代理调度工具（视版本叫`Task`或`Agent`，认能力不认名字），`subagent_type`填对应agent名：`mccl-developer`、`mccl-tester`、`mccl-reporter`、`mccl-supervisor`、`mccl-prober`。每次调用的`prompt`里必须写清楚：本轮要读哪些文件（绝对路径）、本轮产物写到哪个目录（绝对路径）。子代理各自的定义文件（`.claude/agents/*.md`）里"run目录"是抽象说法，具体指向哪个路径由你在prompt里明确给出——不给具体路径，子代理没有办法知道该往哪写。
 
 **产物文件名带序号的，prompt里必须给出完整文件名，不能只给目录。** 具体有两处，它们的序号只有你知道（子代理不共享你的循环变量，也不该去反推）：
 
 - `mccl-reporter`：写到`$RUN_DIR/attempt-<attempt>/report-<report_attempt>.md`——把`<report_attempt>`替换成本次循环的实际值再写进prompt（例如`report-2.md`）。给成目录或`report.md`，报告就会覆盖上一轮、或落在第96行`cp`找不到的地方，报告内循环的历史和全绿路径的最后一步一起断掉。
 - `mccl-supervisor(stage=report)`：写到`$RUN_DIR/attempt-<attempt>/verdict-report-<report_attempt>.md`，同样给完整文件名。另两道卡点（`stage=dev`/`stage=test`）的verdict文件名不带序号，但**路径必须含`attempt-<attempt>/`子目录**，也一并在prompt里给全。
 
-你自己只准用Bash做以下这类只读/建目录/写自己产物的操作：`mkdir -p`、`date`、`head -1`（解析verdict）、`cat`/写入`task.md`/`timeline.md`/`escalation.md`、`cp`（拷贝最终报告）、检查文件是否存在。不得用Bash改源码、编译、跑mpirun。
+你自己只准用Bash做以下这类只读/建目录/写自己产物的操作：`mkdir -p`、`date`、`head -1`（解析verdict）、`cat`/写入`task.md`/`timeline.md`/`escalation.md`、`cp`（拷贝最终报告）、检查文件是否存在、`python3 -c`（读 `gpu-verdict.json` 的 `verdict` 字段）。不得用Bash改源码、编译、跑mpirun、跑 `bin/mccl-gpu-probe`（那是 `mccl-prober` 的活）。
 
 ## 1. run目录布局（权威版本，逐字照此实现，不得用平铺布局）
 
@@ -31,11 +31,13 @@ description: 跑一轮完整的MCCL开发验证流水线：开发→监督→测
 ├── attempt-1/
 │   ├── change.patch  dev-change.md  build.log        # mccl-developer产出
 │   ├── verdict-dev.md                                 # mccl-supervisor(stage=dev)产出
+│   ├── gpu-preflight.md  gpu-verdict.json            # mccl-prober 产出（GPU环境门禁）
 │   ├── test-preflight.md  test-asymmetric.log  test-symmetric.log  test-result.md
 │   ├── test-anomaly.md                                # 仅异常时，mccl-tester产出
 │   ├── verdict-test.md                                # mccl-supervisor(stage=test)产出
 │   └── report-1.md  verdict-report-1.md  [report-2.md  verdict-report-2.md]
 ├── attempt-2/ …                   # 同构，仅在attempt递增时出现
+├── .bw-cache/                      # GPU 带宽缓存（mccl-prober 跨 attempt 复用，见第3节门禁）
 ├── escalation.md                  # 仅ABORT或超限时出现
 └── final-report.md                # 全绿时，从通过的那份report-N.md拷贝而来
 ```
@@ -76,9 +78,18 @@ attempt = 1..3:
     写: $RUN_DIR/attempt-<attempt>/verdict-dev.md
   timeline.md 追加一行（含判决）
   v = head -1 $RUN_DIR/attempt-<attempt>/verdict-dev.md
-    v含PASS   → 往下走（进入测试）
+    v含PASS   → 往下走（进入GPU环境门禁）
     v含REWORK → attempt++；若attempt>3见第4步；否则回到本循环顶部（下一轮task.md记入本次"待修项"）
     v含ABORT  → 写 escalation.md（见第6节），停止，向用户报告
+
+  Task(mccl-prober)                      # GPU 环境门禁：dev 已 PASS，铺 32 卡前最后一道闸
+    传参: run目录路径=$RUN_DIR, attempt=<attempt>
+    写: $RUN_DIR/attempt-<attempt>/{gpu-preflight.md, gpu-verdict.json}
+  timeline.md 追加一行（含 verdict）
+  v = 读 $RUN_DIR/attempt-<attempt>/gpu-verdict.json 的 verdict 字段（python3 -c 读，非 head -1）
+    v=READY     → 往下走（进入测试）
+    v=NOT_READY → 停，向用户报告 gpu-verdict.json 的 failures[]，不递增 attempt、不调 tester（环境问题不是代码问题，不烧开发重试预算）
+    v=error     → 停，向用户报告探测出错，不递增 attempt
 
   Task(mccl-tester)
     读: $RUN_DIR/attempt-<attempt>/{change.patch, dev-change.md, build.log}
@@ -128,6 +139,7 @@ attempt超3仍未在dev/test关口拿到PASS → 写 escalation.md（见第6节�
 - `mccl-developer`内部的编译失败重试（上限5轮）**完全不体现在`attempt`上**——那是它自己内部的事，产物只有最终态的`change.patch`/`dev-change.md`/`build.log`一份。
 - 报告内循环（`report_attempt`，上限2）**不递增`attempt`**——它是`attempt`同一轮次内部的子循环，用独立变量`report_attempt`计数，落盘到文件名`report-<report_attempt>.md`里。
 - 换句话说：`attempt`衡量的是"改代码 → 上32卡集群验证"这个完整闭环跑了几次；编译对错、报告写没写准，都不算这个闭环的一次。
+- GPU环境门禁（`mccl-prober`）判 NOT_READY/error **不递增 attempt**：门禁是环境问题（GPU被占/带宽挂/bin缺），不是代码问题。停、报告用户、等环境恢复或人工干预后重跑同一 attempt。这与"报告 REWORK 不递增 attempt"同一逻辑。
 
 ## 6. `escalation.md`格式
 
