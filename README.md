@@ -401,7 +401,7 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
 | mpirun hang超5分钟 | 见`test-anomaly.md` | **禁止重启**（`references/mccl-safety.md`第3条）。agent会采`dmesg`+IB状态后停下等你（`agents/mccl-tester.md`第5节）。你也别手动重启——这条是`测试.md`原始规程里的硬禁令 |
 | 监督员判REWORK："历史产物缺失" | 前几轮的`attempt-N/`不在 | 诊断门要跨轮读`attempt-1/dev-change.md`和`attempt-2/dev-change.md`比对根因假设（`references/supervisor-checklists/dev.md`第10条）。run目录必须按轮次分子目录，不能平铺 |
 | SegFault | 已知故障模式 | 查`MCCL_P2P_LEVEL`是否与固件匹配（`agents/mccl-tester.md`第6节） |
-| UDS Connection refused | 已知故障模式 | 确认`$MCCL_MACA_PATH`的`mcMemFabricHandle_t`是1112字节版本，不是80字节旧版stub（`agents/mccl-tester.md`第6节、`mccl-env.json.example`的 `_comment` 与 `mccl-build-pitfalls.md`第1条） |
+| UDS Connection refused | 已知故障模式 | 确认`$MCCL_MACA_PATH`的`mcMemFabricHandle_t`是1112字节版本，不是80字节旧版stub（`agents/mccl-tester.md`第6节、`mccl-env.json.example`的 `_comments.maca_path`） |
 
 ## 各角色边界速查
 
@@ -433,7 +433,7 @@ plugins/mccl-digital-employee/
 │   ├── mccl-remote-ops.md            远程调用模式手册（ssh跳板、docker exec引号嵌套、按$MCCL_NODES循环的分发差异）
 │   └── supervisor-checklists/
 │       ├── dev.md      test.md      report.md      三道卡点各自的监督checklist
-├── mccl-env.json.example  14个raw键模板（_comment 带说明）
+├── mccl-env.json.example  14个raw键模板（_comments 带详细说明）
 └── tests/check.sh          13条静态不变式自检（仓库级+插件级）
 docs/superpowers/{specs,plans}/      设计与实施计划
 ```
