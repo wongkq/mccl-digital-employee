@@ -409,6 +409,27 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
 - `gpu_health_check.sh` 是仓库根的未跟踪独立脚本（含内网信息，不入 git）。包装脚本 `bin/mccl-gpu-probe` 是跟踪的插件文件，不含任何私网 IP/密码，一律用 `$MCCL_*` 变量。
 - mx-smi 占用判定的输出格式假设仿 nvidia-smi 的 `Processes:` 段，需在真实硬件上校准；探测器的远程执行行为本仓库无法端到端验证，首用建议人工盯一轮。
 
+## 测试矩阵与前后对比（/mccl-bench）
+
+`/mccl-bench` 是与 `/mccl-run` 并存的性能测试流水线：`/mccl-run` 跑2个固定场景各一次出**验证报告**（服务于 commit 决策），`/mccl-bench` 跑 AI 推断的场景矩阵多轮出**性能/对比报告**（服务于性能评估）。
+
+**用法**：`/mccl-bench <任务描述> [--rounds N] [--compare]`
+- `--rounds N`：每场景跑 N 轮（默认1），多轮算 mean/min/max
+- `--compare`：前后对比模式，双编译 before（HEAD干净基线）+ after（工作区改动）两份 .so
+
+**流程**：planner 读 change.patch 推断场景矩阵 → prober 门禁（复用①）→ developer 双编译分发 → runner 多轮 mpirun 采数聚合 → reporter 按 `references/bench-report-template.md` 填模板 → supervisor 审场景覆盖率+数字出处。
+
+**与 /mccl-run 的区别**：
+- bench 是**采数**，部分失败（某轮 hang）跳过、报告标"未覆盖"，不整体停；mccl-run 是**验证**，要求全绿
+- bench 不设外层 attempt（不是改代码→验证闭环）；mccl-run 有 attempt≤3
+- bench 不自动 commit（commit 决策归 mccl-run）
+
+**已知限制**：
+- AI 推断场景矩阵有不确定性，靠 planner 的"选择理由"+supervisor 审计兜底，首次使用建议人工盯 bench-plan.md
+- ⑤对比每次多编一份旧 .so（+几分钟），v1 无基线缓存
+- 默认1轮算不出统计意义（单点），要 mean/min/max 显式 `--rounds N`
+- bench 远程执行（mpirun多轮、双编译分发）本仓库无法端到端验证，首用建议人工盯一轮
+
 ## 出问题怎么查
 
 | 现象 | 原因 | 怎么办 |
