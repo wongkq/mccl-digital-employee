@@ -388,6 +388,27 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
 - `stage=test`判REWORK → 问题还是在代码（没解决问题或引入新问题）→ 同样打回开发，重新走`attempt`。
 - `stage=report`判REWORK → 问题在报告怎么写，测试数据本身是好的 → 只打回报告，只重跑`mccl-reporter`，绝不重新占用集群跑一遍测试。
 
+## GPU环境门禁（mccl-prober）
+
+`/mccl-run` 在 `mccl-supervisor(stage=dev)` 判 PASS 之后、`mccl-tester` 之前，会先跑一道 **GPU 环境门禁**：核对 GPU 是否真的存在、健康、空闲、带宽达标，再决定是否铺 32 卡测试。避免测试直接铺到 GPU 正忙或正在报错的节点上空跑一轮。
+
+**怎么跑的**：`mccl-prober` 调 `bin/mccl-gpu-probe --mode full`，复用仓库根的 `gpu_health_check.sh` 作带宽/健康引擎（scp 到 NODE0 跑、报告拉回本地解析），补占用检测（mx-smi 进程列表，任一卡有进程即占用）与 bin 就绪核对，产出 `<run>/attempt-<N>/{gpu-preflight.md, gpu-verdict.json}`。带宽按 run 缓存（`<run>/.bw-cache/`，跨 attempt 复用），占用每轮重查。
+
+**三态行为**（主控只读 `gpu-verdict.json` 的 `verdict` 字段）：
+
+| verdict | 含义 | 主控动作 | 递增 attempt |
+|---|---|---|---|
+| READY | 全绿（带宽 WARN 仍算 READY，标告警） | 进 tester | 否 |
+| NOT_READY | 占用/带宽FAIL/bin缺/拓扑不符 | 停，报告 failures，等环境 | 否 |
+| error | 探测自身出错（ssh 不通/mxvs 缺/脚本崩） | 停，报告出错 | 否 |
+
+**三态都不递增 attempt**——门禁是环境问题不是代码问题，不烧开发重试预算。
+
+**已知限制**：
+- 占用判定"有进程即占用"是最严判定。集群若有常驻监控/守护进程占某卡，门禁会恒 NOT_READY。预留白名单/PID 过滤作为未来收紧项，v1 不做。
+- `gpu_health_check.sh` 是仓库根的未跟踪独立脚本（含内网信息，不入 git）。包装脚本 `bin/mccl-gpu-probe` 是跟踪的插件文件，不含任何私网 IP/密码，一律用 `$MCCL_*` 变量。
+- mx-smi 占用判定的输出格式假设仿 nvidia-smi 的 `Processes:` 段，需在真实硬件上校准；探测器的远程执行行为本仓库无法端到端验证，首用建议人工盯一轮。
+
 ## 出问题怎么查
 
 | 现象 | 原因 | 怎么办 |
