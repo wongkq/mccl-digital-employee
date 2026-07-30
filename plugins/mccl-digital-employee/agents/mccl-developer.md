@@ -73,6 +73,46 @@ run目录下的`task.md`，包含：
 
    分发完就地自查：第7节要求的md5（构建产物 + 各节点的`libmccl.so`，多节点模式共`$MCCL_NNODES + 1`份、单节点模式共2份）此时应当已经全部一致。多节点模式下，**编译节点是唯一一个既是编译节点、又要被分发的**，别因为"产物本来就在这台机器上"而跳过它——产物在`build/`里，不在`$MCCL_MACA_LIB_DIR`里，这是两个目录。
 
+## 3b. 双编译分支（仅 /mccl-bench --compare 模式）
+
+当主控以 bench-compare 模式调用你时，你要产出**两份** `libmccl.so`：before（HEAD 干净基线）和 after（工作区改动）。runner 会按文件名切换加载。
+
+### 流程
+
+1. **编 before（HEAD 干净基线）**：
+   ```bash
+   cd "$MCCL_LOCAL_SRC"
+   git stash push -u -m "mccl-bench-before-tmp"   # 暂存工作区改动（含未跟踪）
+   git checkout HEAD -- .                           # 工作区回到 HEAD 干净态
+   ```
+   走标准 §3 工作流（rsync → `rm -rf build/macaify && make -j50` → 分发），但产物存为 `libmccl.so.before`：
+   - 编译产物：`$MCCL_REMOTE_SRC/build/libmccl.so` 编出后，在编译节点 `cp` 为 `libmccl.so.before`
+   - 分发：对 `$MCCL_NODES` 每个节点，`scp libmccl.so.before` 到 `$MCCL_MACA_LIB_DIR/`
+   - md5 核对：`libmccl.so.before.md5` 记录各节点 md5
+
+2. **恢复工作区改动**：
+   ```bash
+   git stash pop   # 恢复工作区改动（含未跟踪文件）
+   ```
+   若 stash pop 冲突（极少，因 HEAD checkout 不会动已提交文件），停止上报——不要 force。
+
+3. **编 after（工作区改动）**：
+   走标准 §3 工作流，产物存为 `libmccl.so.after`，同样分发 + md5。
+
+### 关键约束
+
+- **基线 = HEAD，不是 HEAD~1**。改动通常在工作区未提交，"前"是提交前干净态。
+- 两份 .so 都走**完整分发 + md5 核对**（各节点 `$MCCL_MACA_LIB_DIR/libmccl.so.before` 与 `libmccl.so.after`）。
+- `git stash pop` 必须成功——失败说明基线 checkout 误动了工作区，停止上报，不 force。
+- before 编译失败 = ABORT（基线编不过说明环境/工具链问题，继续编 after 无意义）。
+- after 编译失败 = 走标准 §4 编译内循环（上限5轮）。
+- 纯②模式（不带 --compare）：**不走 §3b**，只走标准 §3 编一份 `libmccl.so.after`。
+
+### 产物
+
+- `before/build.log`、`after/build.log`（各自完整编译日志，重定向在 ssh 外流回本地）
+- `libmccl.so.before.md5`、`libmccl.so.after.md5`（各节点 md5，runner 会独立核对）
+
 ## 4. 编译内循环（上限5轮）
 
 以下命令按第1节判断出的`$MCCL_CONTAINER`模式，套`docker exec $MCCL_CONTAINER bash -c`（容器模式）或`bash -lc`（无容器模式）执行，两种形态的完整命令见`$TOOLKIT_ROOT/references/mccl-build-pitfalls.md`第2条。
