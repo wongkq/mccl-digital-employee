@@ -200,6 +200,75 @@ else
   ok "ssh/scp 均带 \$MCCL_SSH_OPTS 防挂起"
 fi
 
+# --- 14. bin/mccl-gpu-probe 存在、可执行、--help 合法、无裸 ssh/scp ---
+probe="$PLUGIN_ROOT/bin/mccl-gpu-probe"
+if [ ! -f "$probe" ]; then
+  err "$probe 缺失"
+elif [ ! -x "$probe" ]; then
+  err "$probe 不可执行"
+else
+  help_out=$("$probe" --help 2>&1); help_rc=$?
+  if [ "$help_rc" -ne 0 ]; then
+    err "$probe --help 退出码非 0 ($help_rc)"
+  else
+    for kw in --mode --hosts --reuse-bw; do
+      echo "$help_out" | grep -q -- "$kw" || err "$probe --help 未提及 $kw"
+    done
+    [ "$fail" -eq 0 ] && ok "bin/mccl-gpu-probe --help 合法" || true
+  fi
+  # 无裸 ssh/scp：所有 ssh/scp 行必含 $MCCL_SSH_OPTS
+  # 注：brief 的 `\b(ssh|scp)\b` 会把 `emit_error_json` 里 CJK 错误消息
+  # （"ssh 失败"/"ssh（"）误判为裸 ssh——这些是错误消息文本，非真实调用。
+  # 真实调用 5 处全为 `ssh $MCCL_SSH_OPTS`/`scp $MCCL_SSH_OPTS`，后接 $ 或 ASCII 字母；
+  # CJK 错误消息的下一字符是 CJK 字符。用 `[^\x{4e00}-\x{9fff}\x{ff00}-\x{ffef}]`
+  # （排除 CJK + 全角）做命令形态过滤。Step 4 负向 sed 把 `$MCCL_SSH_OPTS` 删掉后
+  # 下一字符变 `"` (ASCII)，本正则仍命中，确保负向测试有效。
+  bare_ssh=$(grep -nP '\b(ssh|scp)\s+[^\x{4e00}-\x{9fff}\x{ff00}-\x{ffef}]' "$probe" \
+    | grep -v 'MCCL_SSH_OPTS' \
+    | grep -v '^[0-9]*: *#' \
+    || true)
+  if [ -n "$bare_ssh" ]; then
+    err "$probe 有不带 \$MCCL_SSH_OPTS 的裸 ssh/scp（密钥未配会挂起）"
+    echo "$bare_ssh" | sed 's/^/        /' >&2
+  else
+    ok "bin/mccl-gpu-probe 无裸 ssh/scp"
+  fi
+fi
+
+# --- 15. mccl-prober agent frontmatter 完整 + 含 Bash；mccl-run 引用 mccl-prober ---
+pf="$PLUGIN_ROOT/agents/mccl-prober.md"
+if [ ! -f "$pf" ]; then
+  err "$pf 缺失"
+else
+  pfm_name=$(awk '/^---$/{n++; next} n==1' "$pf" | sed -n 's/^name: *//p')
+  [ "$pfm_name" = "mccl-prober" ] || err "$pf 的 name($pfm_name) 与文件名不一致"
+  if ! awk '/^---$/{n++; next} n==1' "$pf" | sed -n 's/^tools: *//p' | grep -qw 'Bash'; then
+    err "$pf 的 tools 不含 Bash（探测员需跑探测脚本）"
+  else
+    ok "mccl-prober frontmatter 合法且含 Bash"
+  fi
+fi
+if ! grep -q 'mccl-prober' "$PLUGIN_ROOT/commands/mccl-run.md"; then
+  err "mccl-run.md 未引用 mccl-prober（门禁未接入）"
+else
+  ok "mccl-run.md 引用 mccl-prober"
+fi
+
+# --- 16. tests/test-gpu-probe.sh 存在、可执行、通过（功能单测）---
+tgp="$PLUGIN_ROOT/tests/test-gpu-probe.sh"
+if [ ! -f "$tgp" ]; then
+  err "$tgp 缺失"
+elif [ ! -x "$tgp" ]; then
+  err "$tgp 不可执行"
+else
+  if bash "$tgp" >/tmp/mccl_tgp.out 2>&1; then
+    ok "test-gpu-probe.sh 功能单测通过"
+  else
+    err "test-gpu-probe.sh 单测失败"
+    cat /tmp/mccl_tgp.out | sed 's/^/        /' >&2
+  fi
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"
