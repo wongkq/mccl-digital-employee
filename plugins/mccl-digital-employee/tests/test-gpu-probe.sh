@@ -68,6 +68,23 @@ assert_eq "emit occupancy False" "False" "$occ"
 nf=$(printf '%s' "$doc" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["failures"]))')
 assert_eq "emit failures count 2" "2" "$nf"
 
+# --- 5. check_occupancy：ssh 失败必须 return 2（不可达节点不能静默判空闲）---
+# 覆盖 ssh_exec_read 模拟失败；MCCL_NODES 设 1 节点。验三件事：
+#   a) 函数返回码 == 2（让 call-site 的 || guard 激活）
+#   b) OCC_FAILURES 记录到该节点（诊断信息）
+#   c) OCC_JSON 的 all_free 不是 true（不能误判为空闲）
+# 真远程校验留给现场 test-engineer；本地只能跑 mock。
+ssh_exec_read() { return 1; }
+MCCL_NODES="1.2.3.4"
+check_occupancy; occ_rc=$?
+assert_eq "occ ssh-fail return 2" "2" "$occ_rc"
+echo "$OCC_FAILURES" | grep -q '1.2.3.4' || assert_eq "occ ssh-fail recorded host" "present" "absent"
+echo "$OCC_JSON" | grep -q '"all_free":false' || assert_eq "occ ssh-fail all_free=false" "false" "true"
+# 恢复 ssh_exec_read 防止污染后续 case
+unset -f ssh_exec_read
+# shellcheck source=/dev/null
+. "$PROBE" 2>/dev/null
+
 echo
 [ "$fail" -eq 0 ] && echo "gpu-probe 测试全部通过 ($pass)" || echo "gpu-probe 测试有失败 ($fail)"
 exit "$fail"

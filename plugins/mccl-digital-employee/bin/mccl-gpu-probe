@@ -114,7 +114,7 @@ GPU 环境探测原语（MCCL 子系统①）。复用 gpu_health_check.sh，输
 退出码: 0=READY 1=NOT_READY 2=error
 选项:
   --mode full|quick   full=含带宽(默认)，quick=只拓扑/占用/bin 不跑带宽
-  --hosts IP1 IP2...  覆盖主机列表(空格分隔；缺省取 mccl-env.json 的 MCCL_NODES)
+  --hosts IP1 IP2...  覆盖主机列表(v1 预留：当前取自 mccl-env.json 的 MCCL_NODES)
   --reuse-bw <dir>    带宽缓存目录(同 run 的后续 attempt 复用；缓存为空自动跑并填充)
   --no-bw-cache       强制重测带宽
   --out <path>        gpu-verdict.json 输出路径(缺省打到 stdout)
@@ -157,11 +157,21 @@ check_bins() {
 
 # check_occupancy: 每机 mx-smi 进程列表，任一卡有进程即占用。设 OCC_ALL_FREE/OCC_JSON/OCC_N/OCC_FAILURES。
 # mx-smi 输出假设含 "Processes:" 段（仿 nvidia-smi），有数据行=占用。远程格式需真实硬件校准（spec §7/§9.1）。
+# 任何主机 ssh 失败 = 不可达 = 不可判定空闲 → 直接归 error（return 2），
+# 触发 call-site 的 `check_occupancy || emit_error_json "占用检查 ssh 失败" → exit 2`。
+# 不允许"ssh 失败 → 静默判空闲"——那是 false-READY 方向错误（spec 安全原则）。
 check_occupancy() {
-  OCC_ALL_FREE=1; OCC_N=0; OCC_JSON='{"all_free":true,"occupied":[]}'; OCC_FAILURES=""
-  local occ_arr="" host out procs
+  OCC_ALL_FREE=1; OCC_N=0; OCC_JSON='{"all_free":false,"occupied":[]}'; OCC_FAILURES=""
+  local occ_arr="" host out procs rc
   for host in $MCCL_NODES; do
-    out=$(ssh_exec_read "$host" "mx-smi 2>&1") || out=""
+    out=$(ssh_exec_read "$host" "mx-smi 2>&1"); rc=$?
+    if [ "$rc" -ne 0 ] || [ -z "${out:-}" ]; then
+      # ssh 失败（不可达 / 密钥未配）→ 记录并立即归 error，不静默判空闲
+      OCC_FAILURES="${OCC_FAILURES}${OCC_FAILURES:+$'\n'}$host ssh 失败（不可达/密钥未配）"
+      occ_arr="${occ_arr%,}"
+      OCC_JSON="{\"all_free\":false,\"occupied\":[$occ_arr,{\"host\":\"$host\",\"procs\":[\"网络不可达\"]}]}"
+      return 2
+    fi
     procs=$(printf '%s' "$out" | sed -n '/Processes:/,$p' | grep -cE '^[[:space:]]+[0-9]+[[:space:]]+[0-9]' || true)
     if [ "${procs:-0}" -gt 0 ] 2>/dev/null; then
       OCC_ALL_FREE=0; OCC_N=$((OCC_N+1))
@@ -202,6 +212,9 @@ run_bandwidth() {
   s=$(parse_health_stats "$report") || return 2
   eval "$s"
   BW_FAIL=${FAIL:-0}; BW_ERROR=${ERROR:-0}; BW_WARN=${WARN:-0}; BW_PASS=${PASS:-0}; BW_TOTAL=${TOTAL:-0}
+  # 缓存命中但报告解析为空/损坏（TOTAL=0）：不当作 0-fail-0-error 的"健康"，归 error。
+  # 真健康跑必出 >=1 测试项；TOTAL=0 唯一可能是报告损坏/格式变了——cache hit 不能掩盖。
+  [ "${BW_TOTAL:-0}" -gt 0 ] 2>/dev/null || { echo "mccl-gpu-probe: health_report.txt 解析为空/损坏（TOTAL=0）：$report" >&2; return 2; }
   return 0
 }
 
