@@ -269,6 +269,67 @@ else
   fi
 fi
 
+# --- 17. /mccl-bench 命令引用的 agent 均已定义 ---
+bcf="$PLUGIN_ROOT/commands/mccl-bench.md"
+if [ ! -f "$bcf" ]; then
+  err "$bcf 缺失"
+else
+  for a in mccl-bench-planner mccl-bench-runner mccl-developer mccl-reporter mccl-supervisor mccl-prober; do
+    grep -q "$a" "$bcf" || err "$bcf 未引用 agent: $a"
+    [ -f "$PLUGIN_ROOT/agents/$a.md" ] || err "agent 定义缺失: $a.md"
+  done
+  ok "/mccl-bench 引用的 agent 均已定义"
+fi
+
+# --- 18. mccl-bench-planner frontmatter 完整 + 含 Bash + 正文含"选择理由"必填提示 ---
+pbf="$PLUGIN_ROOT/agents/mccl-bench-planner.md"
+if [ ! -f "$pbf" ]; then
+  err "$pbf 缺失"
+else
+  pfm_name=$(awk '/^---$/{n++; next} n==1' "$pbf" | sed -n 's/^name: *//p')
+  [ "$pfm_name" = "mccl-bench-planner" ] || err "$pbf 的 name($pfm_name) 与文件名不一致"
+  if ! awk '/^---$/{n++; next} n==1' "$pbf" | sed -n 's/^tools: *//p' | grep -qw 'Bash'; then
+    err "$pbf 的 tools 不含 Bash（规划员需读 change.patch）"
+  else
+    ok "mccl-bench-planner frontmatter 合法且含 Bash"
+  fi
+  # 正文必须提示"选择理由"必填（审计约束的静态守卫）
+  grep -q '选择理由' "$pbf" || err "$pbf 正文未提'选择理由'必填（审计约束缺失）"
+fi
+
+# --- 19. bench 报告模板存在 ---
+if [ ! -f "$PLUGIN_ROOT/references/bench-report-template.md" ]; then
+  err "references/bench-report-template.md 缺失（reporter 填数前提）"
+else
+  ok "bench 报告模板存在"
+fi
+
+# --- 20. bench-stats.json schema 闭环：stats 键名 algbw_GBs/busbw_GBs 在模板里出现 ---
+tpl="$PLUGIN_ROOT/references/bench-report-template.md"
+stats_py="$PLUGIN_ROOT/bin/mccl-bench-stats.py"
+if [ -f "$tpl" ] && [ -f "$stats_py" ]; then
+  for k in algbw_GBs busbw_GBs; do
+    grep -q "$k" "$stats_py" || err "mccl-bench-stats.py 未产出键 $k"
+    grep -q "$k" "$tpl" || err "bench-report-template.md 未引用键 $k（schema 不闭环）"
+  done
+  ok "bench-stats schema 闭环（algbw_GBs/busbw_GBs 在 stats.py 与模板一致）"
+fi
+
+# --- 20b. test-bench-stats.sh 存在、可执行、通过（功能单测）---
+tbs="$PLUGIN_ROOT/tests/test-bench-stats.sh"
+if [ ! -f "$tbs" ]; then
+  err "$tbs 缺失"
+elif [ ! -x "$tbs" ]; then
+  err "$tbs 不可执行"
+else
+  if bash "$tbs" >/tmp/mccl_tbs.out 2>&1; then
+    ok "test-bench-stats.sh 功能单测通过"
+  else
+    err "test-bench-stats.sh 单测失败"
+    cat /tmp/mccl_tbs.out | sed 's/^/        /' >&2
+  fi
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"
