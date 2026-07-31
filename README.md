@@ -406,7 +406,7 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
 
 **已知限制**：
 - 占用判定"有进程即占用"是最严判定。集群若有常驻监控/守护进程占某卡，门禁会恒 NOT_READY。预留白名单/PID 过滤作为未来收紧项，v1 不做。
-- `gpu_health_check.sh` 是仓库根的未跟踪独立脚本（含内网信息，不入 git）。包装脚本 `bin/mccl-gpu-probe` 是跟踪的插件文件，不含任何私网 IP/密码，一律用 `$MCCL_*` 变量。
+- `gpu_health_check.sh` 已脱敏并入库：默认 `HOSTS=()` / `SSH_PASS=""`（占位），真实主机与密码由调用方经 `--hosts <csv>` / `GHC_HOSTS` / `GHC_SSH_PASS` 注入。打包脚本 `bin/mccl-gpu-probe` 照常全用 `$MCCL_*`，自身无 IP/密码。严禁把真实主机/密码写回 `gpu_health_check.sh` 后再提交。
 - mx-smi 占用判定的输出格式假设仿 nvidia-smi 的 `Processes:` 段，需在真实硬件上校准；探测器的远程执行行为本仓库无法端到端验证，首用建议人工盯一轮。
 
 ## 测试矩阵与前后对比（/mccl-bench）
