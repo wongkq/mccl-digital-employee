@@ -48,6 +48,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT"
 TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"  # 缺 mccl-env.json 则停，提示用户先配
 RUN_DIR="$REPO_ROOT/.mccl-bench/$(date +%Y-%m-%d-%H%M)"
+COMPARE=false; [[ "$*" == *--compare* ]] && COMPARE=true
 mkdir -p "$RUN_DIR" "$RUN_DIR/after" $($COMPARE && echo "$RUN_DIR/before")
 ```
 初始化 timeline.md（任务描述 + 开始时间 + 模式 + rounds）。

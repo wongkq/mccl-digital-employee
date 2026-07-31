@@ -129,7 +129,7 @@ else
 fi
 
 # --- 10. checklist 三份齐全 ---
-for s in dev test report; do
+for s in dev test report bench; do
   [ -f "$PLUGIN_ROOT/references/supervisor-checklists/$s.md" ] || err "checklist 缺失: $s.md"
 done
 ok "supervisor checklist 齐全"

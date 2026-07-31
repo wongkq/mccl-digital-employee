@@ -49,6 +49,15 @@ assert_eq "build_run scenario id" "sym-1k" "$sid"
 assert_eq "build_run rounds" "3" "$(printf '%s' "$rj" | python3 -c 'import json,sys;print(json.load(sys.stdin)["scenarios"][0]["rounds"])')"
 assert_eq "build_run so_tag" "after" "$(printf '%s' "$rj" | python3 -c 'import json,sys;print(json.load(sys.stdin)["so_tag"])')"
 
+# --- 5. build_run 多场景（数组传递，不词分割）---
+# 仿 runner §5 的 mapfile+数组形态：多行 scenario 各含空格，必须不被词分割丢弃
+asym_line="asym-1k|/dummy/asym|-b 1k -e 1k -f 2|{\"algbw_GBs\":{\"mean\":88.0,\"min\":87.0,\"max\":89.0},\"busbw_GBs\":{\"mean\":170.0,\"min\":168.0,\"max\":172.0}}"
+sym_line="sym-1k|/dummy/sym|-b 1k -e 1k -f 2 -R 2|{\"algbw_GBs\":{\"mean\":95.1,\"min\":94.0,\"max\":96.0},\"busbw_GBs\":{\"mean\":180.0,\"min\":178.0,\"max\":182.0}}"
+scn_arr=("$asym_line" "$sym_line")
+mrj=$(python3 "$STATS" build_run after 3 "${scn_arr[@]}")
+nscn=$(printf '%s' "$mrj" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["scenarios"]))')
+assert_eq "build_run multi-scenario count" "2" "$nscn"
+
 echo
 [ "$fail" -eq 0 ] && echo "bench-stats 测试全部通过 ($pass)" || echo "bench-stats 测试有失败 ($fail)"
 exit "$fail"

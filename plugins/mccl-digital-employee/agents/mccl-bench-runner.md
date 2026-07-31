@@ -78,9 +78,10 @@ for scenario in <bench-plan.md 的场景列表>; do
   echo "<scenario_id>|<bin>|<params>|$mj"
 done > "$TMP/<so_tag>_scenarios.txt"
 
-# 组装该 so_tag 的 run JSON
+# 组装该 so_tag 的 run JSON（用 mapfile+数组避免词分割：scenario 行含空格）
+mapfile -t scn_lines < "$TMP/<so_tag>_scenarios.txt"
 python3 "$TOOLKIT_ROOT/bin/mccl-bench-stats.py" build_run <so_tag> <rounds> \
-  $(cat "$TMP/<so_tag>_scenarios.txt") > "$TMP/run_<so_tag>.json"
+  "${scn_lines[@]}" > "$TMP/run_<so_tag>.json"
 ```
 
 最终把所有 so_tag 的 run 合并成顶层 `bench-stats.json`：
