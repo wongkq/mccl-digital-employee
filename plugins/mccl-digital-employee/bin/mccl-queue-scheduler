@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# bin/mccl-queue-scheduler - MCCL bench 队列调度器（子系统⑥⑦）
+#
+# 范式A：cron每5分钟触发（无参数=调度循环），或控制子命令。
+# 无状态：所有状态在 .mccl-bench-queue/queue.json，崩溃下轮cron恢复。
+# 不用daemon。调度逻辑确定性，不AI推理。
+#
+# 退出码：0=正常（无论是否DISPATCH），2=脚本自身出错。
+#
+# 纯函数（queue_*）可被 tests/ 源码加载单测；schedule_loop 才做远程编排。
+set -uo pipefail
+
+# ===================== 纯函数（可单测，不碰远程/环境） =====================
+
+# queue_head_pending_id <queue.json> - 打印第一个 PENDING 任务的 task_id（无则空）
+queue_head_pending_id() {
+  local f="$1"
+  [ -f "$f" ] || { echo ""; return 1; }
+  python3 -c '
+import json,sys
+try: d=json.load(open(sys.argv[1]))
+except: print(""); sys.exit(0)
+for t in d.get("tasks",[]):
+    if t.get("status")=="PENDING":
+        print(t.get("task_id","")); sys.exit(0)
+print("")
+' "$f"
+}
+
+# queue_set_status <queue.json> <task_id> <new_status>
+queue_set_status() {
+  python3 -c '
+import json,sys
+f,tid,st=sys.argv[1],sys.argv[2],sys.argv[3]
+try: d=json.load(open(f))
+except: d={"tasks":[]}
+for t in d.get("tasks",[]):
+    if t.get("task_id")==tid: t["status"]=st
+json.dump(d,open(f,"w"),ensure_ascii=False,indent=2)
+' "$1" "$2" "$3"
+}
+
+# queue_set_field <queue.json> <task_id> <field> <value>
+queue_set_field() {
+  python3 -c '
+import json,sys
+f,tid,fld,val=sys.argv[1],sys.argv[2],sys.argv[3],sys.argv[4]
+try: d=json.load(open(f))
+except: d={"tasks":[]}
+for t in d.get("tasks",[]):
+    if t.get("task_id")==tid: t[fld]=val
+json.dump(d,open(f,"w"),ensure_ascii=False,indent=2)
+' "$1" "$2" "$3" "$4"
+}
+
+# add_task <queue.json> <task_id> <desc> <params>
+add_task() {
+  python3 -c '
+import json,sys
+f,tid,desc,prms=sys.argv[1],sys.argv[2],sys.argv[3],sys.argv[4]
+try: d=json.load(open(f))
+except: d={"tasks":[]}
+d["tasks"].append({"task_id":tid,"desc":desc,"params":prms,"status":"PENDING",
+    "submitted_at":"","progress":"","rounds_done":0,"run_dir":"","probe_errors":0})
+json.dump(d,open(f,"w"),ensure_ascii=False,indent=2)
+' "$1" "$2" "$3" "$4"
+}
+
+# has_pause_flag <dir> - return 0 if pause.flag exists
+has_pause_flag() { [ -f "$1/pause.flag" ]; }
+
+# has_stop_flag <dir> <task_id> - return 0 if stop-<task_id>.flag exists
+has_stop_flag() { [ -f "$1/stop-$2.flag" ]; }
+
+# ===================== 控制子命令 =====================
+
+cmd_submit() {
+  local desc="$1"; shift
+  local params=""
+  while [ $# -gt 0 ]; do params="$params $1"; shift; done
+  params="${params# }"
+  local tid="bench-$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$QUEUE_DIR"
+  [ -f "$QUEUE_DIR/queue.json" ] || echo '{"tasks":[]}' > "$QUEUE_DIR/queue.json"
+  add_task "$QUEUE_DIR/queue.json" "$tid" "$desc" "$params"
+  echo "提交任务: $tid"
+  echo "参数: $params"
+  echo "用 /mccl-bench-queue status 查看队列"
+}
+
+cmd_status() {
+  [ -f "$QUEUE_DIR/queue.json" ] || { echo "队列为空（无 queue.json）"; return; }
+  python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+if not d.get("tasks"): print("队列为空"); sys.exit(0)
+print(f"{'task_id':<24} {'status':<10} {'progress':<16} {'desc'}")
+for t in d["tasks"]:
+    print(f"{t[\"task_id\"]:<24} {t[\"status\"]:<10} {t.get(\"progress\",\"\"):<16} {t[\"desc\"]}")
+' "$QUEUE_DIR/queue.json"
+}
+
+cmd_pause() { mkdir -p "$QUEUE_DIR"; touch "$QUEUE_DIR/pause.flag"; echo "已暂停（写 pause.flag，调度器下轮跳过）"; }
+cmd_resume() { rm -f "$QUEUE_DIR/pause.flag"; echo "已恢复（删 pause.flag）"; }
+cmd_stop() {
+  local tid="$1"
+  mkdir -p "$QUEUE_DIR"
+  touch "$QUEUE_DIR/stop-$tid.flag"
+  echo "已请求终止 $tid（写 stop flag，/mccl-bench 完成后生效）"
+}
+cmd_list() { cmd_status; }
+
+# cmd_complete <task_id> <status> - /mccl-bench 跑完后由 Claude 调用
+cmd_complete() {
+  local tid="$1" st="$2"
+  [ -f "$QUEUE_DIR/queue.json" ] || { echo "queue.json 不存在"; return 1; }
+  queue_set_status "$QUEUE_DIR/queue.json" "$tid" "$st"
+  echo "任务 $tid 标记为 $st"
+}
+
+usage() {
+  cat <<'EOF'
+用法: mccl-queue-scheduler [子命令]
+无参数 = 调度循环（cron 每5分钟触发，输出 DISPATCH/WAIT/STOP/SKIP）。
+控制子命令:
+  submit <描述> [--rounds N] [--compare]  提交任务入队
+  status [task_id]                        显示队列状态
+  pause                                   全局暂停
+  stop <task_id>                          终止指定任务
+  resume                                  恢复调度
+  list                                    列出任务
+  complete <task_id> <DONE|FAILED|STOPPED> /mccl-bench 跑完后标记
+EOF
+}
+
+# ===================== 调度循环（无参数，cron 触发） =====================
+
+schedule_loop() {
+  local qd="$QUEUE_DIR"
+  mkdir -p "$qd"
+  local log="$qd/scheduler.log"
+
+  # flock 防并发
+  exec 9>"$qd/.scheduler.lock"
+  flock -n 9 || { echo "$(date '+%F %T'): 上轮调度仍在运行，跳过" >> "$log"; echo "SKIP:lock"; return 0; }
+
+  [ -f "$qd/queue.json" ] || { echo "$(date '+%F %T'): queue.json 不存在，空队列" >> "$log"; echo "SKIP:empty"; return 0; }
+
+  # 全局暂停
+  if has_pause_flag "$qd"; then
+    echo "$(date '+%F %T'): 全局暂停，跳过" >> "$log"
+    echo "SKIP:paused"; return 0
+  fi
+
+  # 找排头 PENDING
+  local head
+  head=$(queue_head_pending_id "$qd/queue.json")
+  [ -n "$head" ] || { echo "$(date '+%F %T'): 无 PENDING 任务" >> "$log"; echo "SKIP:no-pending"; return 0; }
+
+  # stop 标志检查
+  if has_stop_flag "$qd" "$head"; then
+    queue_set_status "$qd/queue.json" "$head" "STOPPED"
+    rm -f "$qd/stop-$head.flag"
+    echo "$(date '+%F %T'): 任务 $head 被 stop，标记 STOPPED" >> "$log"
+    echo "STOP:$head"; return 0
+  fi
+
+  # 探测环境（调① mccl-gpu-probe）
+  local probe_out="$qd/probe-$(date +%s).json"
+  local probe_rc=0
+  "$TOOLKIT_ROOT/bin/mccl-gpu-probe" --mode full --reuse-bw "$qd/.bw-cache" --out "$probe_out" 2>>"$log" || probe_rc=$?
+
+  # 读 verdict（prober 退出码：0=READY 1=NOT_READY 2=error；但主控契约是读 JSON verdict 字段）
+  local verdict
+  verdict=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("verdict","error"))' "$probe_out" 2>/dev/null || echo "error")
+
+  case "$verdict" in
+    READY)
+      # 重置 probe_errors，标 RUNNING，输出 DISPATCH
+      queue_set_field "$qd/queue.json" "$head" "probe_errors" "0"
+      queue_set_status "$qd/queue.json" "$head" "RUNNING"
+      local params
+      params=$(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+for t in d.get("tasks",[]):
+    if t.get("task_id")==sys.argv[2]: print(t.get("params","")); break
+' "$qd/queue.json" "$head")
+      echo "$(date '+%F %T'): 任务 $head READY，派发 /mccl-bench $params" >> "$log"
+      echo "DISPATCH:$head:$params"
+      ;;
+    NOT_READY)
+      echo "$(date '+%F %T'): 任务 $head 等待环境（NOT_READY）" >> "$log"
+      echo "WAIT:$head:环境未就绪"
+      ;;
+    *)
+      # error：累加 probe_errors，>=12 判 FAILED
+      local errs
+      errs=$(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+for t in d.get("tasks",[]):
+    if t.get("task_id")==sys.argv[2]:
+        e=t.get("probe_errors",0)+1; t["probe_errors"]=e; print(e); break
+json.dump(d,open(sys.argv[1],"w"),ensure_ascii=False,indent=2)
+' "$qd/queue.json" "$head" 2>/dev/null || echo "1")
+      if [ "${errs:-0}" -ge 12 ] 2>/dev/null; then
+        queue_set_status "$qd/queue.json" "$head" "FAILED"
+        echo "$(date '+%F %T'): 任务 $head 连续 $errs 轮探测出错，标记 FAILED" >> "$log"
+        echo "STOP:$head"
+      else
+        echo "$(date '+%F %T'): 任务 $head 探测出错（连续 $errs 轮），等下轮" >> "$log"
+        echo "WAIT:$head:探测出错(连续${errs}轮)"
+      fi
+      ;;
+  esac
+}
+
+# ===================== 环境与根解析 =====================
+
+resolve_roots() {
+  command -v python3 >/dev/null 2>&1 || { echo "mccl-queue-scheduler: 需要 python3" >&2; return 1; }
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "mccl-queue-scheduler: 不在 git 仓库内" >&2; return 1; }
+  # TOOLKIT_ROOT 解析（同 mccl-toolkit-root 逻辑）
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/references/mccl-safety.md" ]; then
+    TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"
+  else
+    TOOLKIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  fi
+  [ -f "$TOOLKIT_ROOT/references/mccl-safety.md" ] || { echo "mccl-queue-scheduler: 找不到 references/" >&2; return 1; }
+  eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")" || return 1
+  QUEUE_DIR="$REPO_ROOT/.mccl-bench-queue"
+}
+
+# ===================== main =====================
+
+main() {
+  if [ $# -eq 0 ]; then
+    resolve_roots || { echo "SKIP:env-error" >&2; exit 2; }
+    schedule_loop
+    exit 0
+  fi
+  case "$1" in
+    submit) shift; resolve_roots || exit 2; cmd_submit "$@";;
+    status) resolve_roots || exit 2; cmd_status;;
+    pause) resolve_roots || exit 2; cmd_pause;;
+    stop) resolve_roots || exit 2; cmd_stop "$2";;
+    resume) resolve_roots || exit 2; cmd_resume;;
+    list) resolve_roots || exit 2; cmd_list;;
+    complete) resolve_roots || exit 2; cmd_complete "$2" "$3";;
+    -h|--help) usage; exit 0;;
+    *) echo "未知子命令: $1" >&2; usage >&2; exit 2;;
+  esac
+}
+
+# 仅当直接执行时跑 main；被 source（单测）时不跑。
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi

@@ -430,6 +430,45 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
 - 默认1轮算不出统计意义（单点），要 mean/min/max 显式 `--rounds N`
 - bench 远程执行（mpirun多轮、双编译分发）本仓库无法端到端验证，首用建议人工盯一轮
 
+## 环境排队与定时任务（/mccl-bench-queue）
+
+GPU 繁忙时 `/mccl-bench` 会因环境不就绪失败。`/mccl-bench-queue` 提供任务排队：提交后调度器每 5 分钟探测 `MCCL_NODES`，环境 READY 才跑，NOT_READY 等下轮。夜间定时也走同一队列。
+
+**提交任务**：`/mccl-bench-queue submit <任务描述> --rounds 3 --compare`
+- 返回 task_id，任务入队（status=PENDING）
+- 调度器（`bin/mccl-queue-scheduler`，cron 每 5 分钟触发）对排头任务调①prober 探测：READY 交②⑤`/mccl-bench` 跑、NOT_READY 等下轮
+
+**控制**：
+| 命令 | 作用 |
+|---|---|
+| `/mccl-bench-queue status` | 查看队列（task_id/status/进度） |
+| `/mccl-bench-queue pause` | 全局暂停（调度器下轮跳过） |
+| `/mccl-bench-queue stop <task_id>` | 终止任务（/mccl-bench 完成后生效） |
+| `/mccl-bench-queue resume` | 恢复调度 |
+
+**定时任务（⑦）**：用 CronCreate 注册夜间定时，到点提交预设场景进同一队列：
+```
+# 例：每晚 23:00 提交夜间对称内存回归
+CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存回归 --rounds 5 --compare"
+```
+提交后进同一队列，调度器 5 分钟轮询消费。
+
+**调度器怎么跑**：`bin/mccl-queue-scheduler`（无参数=调度循环）被 cron 触发时：flock 加锁 -> 读 `.mccl-bench-queue/queue.json` -> 检查 pause/stop 标志 -> 调 prober 探测 -> READY 输出 `DISPATCH:<task_id>:<params>` 交 Claude 跑 `/mccl-bench` -> NOT_READY 输出 `WAIT` 等下轮。无状态、崩溃下轮 cron 恢复。
+
+**CronCreate 调度提示**（注册 cron 时用这个 prompt 触发调度循环）：
+```
+运行 bash bin/mccl-queue-scheduler。读取输出：
+- DISPATCH:<task_id>:<params> -> 运行 /mccl-bench <params>，完成后运行 bash bin/mccl-queue-scheduler complete <task_id> DONE（读 verdict-bench.md：PASS=DONE，REWORK/ABORT=FAILED；若 stop-<task_id>.flag 存在则 STOPPED）
+- WAIT/STOP/SKIP -> 无事可做
+```
+
+**已知限制**：
+- stop 实时性是分钟级（/mccl-bench 完成后检查 stop flag，v1 不中途杀场景）。需秒级要 daemon（已弃）。
+- CronCreate recurring 任务 7 天自动过期（harness 限制），需定期重注册或改系统 cron（`crontab -e`）。
+- 单任务串行（flock + 排头消费），不支持多任务并行（避免争 GPU）。
+- prober 连续 12 轮（1 小时）error 才判 FAILED（不轻易因临时抖动判死）。
+- scheduler 的 cron/flock/prober/派发远程行为本仓库无法端到端验证，首用建议人工盯一轮。
+
 ## 出问题怎么查
 
 | 现象 | 原因 | 怎么办 |

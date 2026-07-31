@@ -330,6 +330,50 @@ else
   fi
 fi
 
+# --- 21. bin/mccl-queue-scheduler 存在、可执行、--help 合法 ---
+qs="$PLUGIN_ROOT/bin/mccl-queue-scheduler"
+if [ ! -f "$qs" ]; then
+  err "$qs 缺失"
+elif [ ! -x "$qs" ]; then
+  err "$qs 不可执行"
+else
+  help_out=$("$qs" --help 2>&1); help_rc=$?
+  if [ "$help_rc" -ne 0 ]; then
+    err "$qs --help 退出码非 0 ($help_rc)"
+  else
+    for kw in submit status pause stop resume; do
+      echo "$help_out" | grep -q -- "$kw" || err "$qs --help 未提及 $kw"
+    done
+    [ "$fail" -eq 0 ] && ok "bin/mccl-queue-scheduler --help 合法" || true
+  fi
+fi
+
+# --- 22. mccl-bench-queue 命令存在且含 submit/status/pause/stop/resume 子命令名 ---
+qcf="$PLUGIN_ROOT/commands/mccl-bench-queue.md"
+if [ ! -f "$qcf" ]; then
+  err "$qcf 缺失"
+else
+  for kw in submit status pause stop resume; do
+    grep -q -- "$kw" "$qcf" || err "$qcf 未提及子命令 $kw"
+  done
+  ok "mccl-bench-queue 命令子命令齐全"
+fi
+
+# --- 23. test-queue.sh 存在、可执行、通过（功能单测）---
+tq="$PLUGIN_ROOT/tests/test-queue.sh"
+if [ ! -f "$tq" ]; then
+  err "$tq 缺失"
+elif [ ! -x "$tq" ]; then
+  err "$tq 不可执行"
+else
+  if bash "$tq" >/tmp/mccl_tq.out 2>&1; then
+    ok "test-queue.sh 功能单测通过"
+  else
+    err "test-queue.sh 单测失败"
+    cat /tmp/mccl_tq.out | sed 's/^/        /' >&2
+  fi
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"
