@@ -469,6 +469,24 @@ CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存
 - prober 连续 12 轮（1 小时）error 才判 FAILED（不轻易因临时抖动判死）。
 - scheduler 的 cron/flock/prober/派发远程行为本仓库无法端到端验证，首用建议人工盯一轮。
 
+## skill 经验同步（/mccl-skill-sync）
+
+你在本仓库里加了坑、场景、模板，想同步给其他人。手动模式给你看 diff 清单、你批准后执行；自动模式供 CronCreate 定时（全部已跟踪修改自动 commit+push，无人值守）。
+
+**手动**：`/mccl-skill-sync`
+> 先列「文件-状态-改动量-你估是什么经验」清单，你批准后才执行 commit+push。
+
+**自动**：`/mccl-skill-sync auto`
+> 经 `tests/check.sh` 硬闸门 → `git add -u`（只收已跟踪修改，绝不自动打包 untracked 新文件）→ commit → push 到每个已配置远端。供CronCreate 注册：`CronCreate cron="0 18 * * *" prompt="/mccl-skill-sync auto"`。
+
+**safety 第 4 条已改**：`mccl-skill-sync` agent 允许 `git push`（同步是它本职工作）；其他 agent（含主控）一律禁止。
+
+**已知边界**：
+- push 失败：commit 留在本地不动、不自动重试（重试是你的判断，不是 agent 的）。
+- 不处理合并冲突、不设 git config（user.email/name 缺失就停）、不擅自 pull。
+- CronCreate recurring 7 天过期，需定期重注册或改系统 cron（同⑥⑦）。
+- 自动模式的对话批准无法本地验证；静态不变式24/25（agent 链闭合/命令 auto 入口）每轮主跑。
+
 ## 出问题怎么查
 
 | 现象 | 原因 | 怎么办 |

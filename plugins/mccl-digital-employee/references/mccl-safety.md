@@ -9,7 +9,7 @@
 | 1 | 禁止在`$MCCL_NODES`中除第一个（编译节点，`$MCCL_NODE0_IP`）之外的任何节点上编译或修改源码。这些节点只接受scp过去的`libmccl.so` | ABORT |
 | 2 | 禁止修改`$MCCL_REMOTE_WORKDIR`之外的任何远程文件 | ABORT |
 | 3 | 禁止重启远程节点。mpirun hang超5分钟时，采集`dmesg`和IB状态后上报，**不重启** | ABORT |
-| 4 | 禁止`git push` | ABORT |
+| 4 | `mccl-skill-sync` agent 允许 `git push`（同步动作本身就是这个 agent 的本职）；其他 agent（含主控）一律禁止 `git push` | ABORT（其他 agent） |
 | 5 | 禁止删除系统文件 | ABORT |
 | 6 | 测试FAIL时**不删除远程源码**（保留供下一轮增量编译用） | REWORK |
 | 7 | 交付的diff中不得残留调试代码。调试期间允许用`printf`/`cout`/`MCCL_DEBUG`宏，但提交前必须清掉 | REWORK |

@@ -8,5 +8,11 @@ mccl-env.sh
 # 运行产物（编译/测试日志，体积大且含内网信息）
 .mccl-runs/
 
+# bench 队列状态与调度日志（本地运行产物）
+.mccl-bench-queue/
+
+# gpu_health_check 远程拉取的结果目录（临时产物）
+gpu_health_results_*/
+
 # SDD执行账本（本地scratch）
 .superpowers/

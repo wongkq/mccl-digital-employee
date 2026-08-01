@@ -374,6 +374,28 @@ else
   fi
 fi
 
+# --- 24. agents/mccl-skill-sync.md 存在且含 git push / git commit / check.sh 三词（同步链闭合）---
+sa="$PLUGIN_ROOT/agents/mccl-skill-sync.md"
+if [ ! -f "$sa" ]; then
+  err "$sa 缺失"
+else
+  fail24=0
+  for kw in "git push" "git commit" "check.sh"; do
+    grep -q -- "$kw" "$sa" || { err "$sa 未提及 $kw"; fail24=1; }
+  done
+  [ "$fail24" = "1" ] || ok "mccl-skill-sync agent 同步链闭合（push/commit/check 齐）"
+fi
+
+# --- 25. commands/mccl-skill-sync.md 存在且含 auto 关键字（自动模式入口）---
+sc="$PLUGIN_ROOT/commands/mccl-skill-sync.md"
+if [ ! -f "$sc" ]; then
+  err "$sc 缺失"
+else
+ fail25=0
+  grep -q -- "auto" "$sc" || { err "$sc 未提及 auto"; fail25=1; }
+  [ "$fail25" = "1" ] || ok "mccl-skill-sync 命令含 auto 自动模式入口"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"
