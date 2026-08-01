@@ -396,6 +396,30 @@ else
   [ "$fail25" = "1" ] || ok "mccl-skill-sync 命令含 auto 自动模式入口"
 fi
 
+# --- 26. agents/mccl-impact-planner.md 存在且含 impact-plan / --scope / **冻结建议** ---
+pa="$PLUGIN_ROOT/agents/mccl-impact-planner.md"
+if [ ! -f "$pa" ]; then
+  err "$pa 缺失"
+else
+  fail26=0
+  for kw in "impact-plan" "--scope" "冻结建议"; do
+    grep -q -- "$kw" "$pa" || { err "$pa 未提及 $kw"; fail26=1; }
+  done
+  [ "$fail26" = "1" ] || ok "mccl-impact-planner agent 关键词齐（impact-plan/scope/冻结建议）"
+fi
+
+# --- 27. commands/mccl-impact-run.md 存在且含调度链两关键字（--scope + mccl-impact-planner）---
+ic="$PLUGIN_ROOT/commands/mccl-impact-run.md"
+if [ ! -f "$ic" ]; then
+  err "$ic 缺失"
+else
+  fail27=0
+  for kw in "\-\-scope" "mccl-impact-planner"; do
+    grep -q -- "$kw" "$ic" || { err "$ic 未提及 $kw"; fail27=1; }
+  done
+  [ "$fail27" = "1" ] || ok "mccl-impact-run 命令调度关键字齐（--scope + planner并）"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"

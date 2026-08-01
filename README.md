@@ -487,6 +487,25 @@ CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存
 - CronCreate recurring 7 天过期，需定期重注册或改系统 cron（同⑥⑦）。
 - 自动模式的对话批准无法本地验证；静态不变式24/25（agent 链闭合/命令 auto 入口）每轮主跑。
 
+## 影响驱动验证（/mccl-impact-run）
+
+改了代码但想知道"改了哪影响什么、测什么算数"。用 `--scope`中新网手工 scope 先行：你告诉任务管哪些文件/模块，planner 读 scope+南京云git diff，给出**受影响功能+调用方+建议测试场景+建议部署位置**冻结建议给你看，你批准/取消/微调后才编、才跑、才判定。
+
+```
+/mccl-impact-run "修了 symm 的一个 case" --scope=src/hw/symm.c,src/hw/slice_nic/
+```
+
+- `--scope` 必须，缺 → 报错提示用法并停（3c 决策：手工 scope 先行，不猜）。
+- planner 产出 `impact-plan.md`（落盘）+ 给你看冻结建议表（涉及模块/受影响功能/调用方/建议场景/建议部署）。你 OK 才往下走。
+- OK 之后：复用现成 mccl-developer 编译、mccl-prober 门禁、mccl-bench-runner 跑被判定到受影响的场景**一次**；判定权仍归 mccl-supervisor(stage=test)。
+- REWORK 打回 planner（scope 理解错就重别考虑），不打回 developer（scope 错就先重考虑，不烧编译）。
+
+**已知限制**：
+- AI 建议的场景是猜的，批准时你负责审。
+- 跑一次不是回归：受影响场景**单次**运行，要性能基线走 `/mccl-bench --compare`。
+- 单目标部署：只发 `MCCL_NODE0_IP`（编译节点）。
+- planner/编排调度无法本地验证；静态不变式26/27守住 agent/命令关键词。
+
 ## 出问题怎么查
 
 | 现象 | 原因 | 怎么办 |
