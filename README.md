@@ -513,7 +513,7 @@ CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存
 - `--scope` 必须，缺 → 报错提示用法并停（3c 决策：手工 scope 先行，不猜）。
 - planner 产出 `impact-plan.md`（落盘）+ 给你看冻结建议表（涉及模块/受影响功能/调用方/建议场景/建议部署）。你 OK 才往下走。
 - OK 之后：复用现成 mccl-developer 编译、mccl-prober 门禁、mccl-bench-runner 跑被判定到受影响的场景**一次**；判定权仍归 mccl-supervisor(stage=test)。
-- REWORK 打回 planner（scope 理解错就重别考虑），不打回 developer（scope 错就先重考虑，不烧编译）。
+- REWORK 打回 planner（scope 理解错就重新考虑），不打回 developer（scope 错就先重新考虑，不烧编译）。
 
 **已知限制**：
 - AI 建议的场景是猜的，批准时你负责审。
