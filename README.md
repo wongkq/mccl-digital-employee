@@ -292,6 +292,21 @@ bash <插件>/bin/mccl-setup-ssh
 
 ## 用法
 
+六条入口命令，按场景选：
+
+| 你要做什么 | 命令 |
+|---|---|
+| 改完代码要验证 pass/fail（跑2固定场景，服务 commit 决策） | `/mccl-run <任务描述>` |
+| 想知道改了哪、影响什么、测什么算数 | `/mccl-impact-run "描述" --scope=<文件/模块>` |
+| 性能评估/对比（多场景矩阵、多轮统计、--compare 前后库对比） | `/mccl-bench <任务描述> [--compare] [--rounds N]` |
+| GPU 忙，想提交后让系统排队空闲再跑 + 夜间定时 | `/mccl-bench-queue submit/status/pause/stop/resume` |
+| 加了坑/场景/模板想一键推给同事 | `/mccl-skill-sync`（手动批） / `/mccl-skill-sync auto` |
+| 日常验证 GPU 环境（不跑业务，只看拓扑/占用/带宽达标） | `bash plugins/.../bin/mccl-gpu-probe --mode full` |
+
+下面按顺序讲清每条命令怎么用。`/mccl-impact-run`、`/mccl-bench`、`/mccl-bench-queue`、`/mccl-skill-sync` 四条的细节见后方各自小节。
+
+### `/mccl-run`
+
 ```
 /mccl-run <任务描述>
 ```
