@@ -504,7 +504,7 @@ CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存
 
 ## 影响驱动验证（/mccl-impact-run）
 
-改了代码但想知道"改了哪影响什么、测什么算数"。用 `--scope`中新网手工 scope 先行：你告诉任务管哪些文件/模块，planner 读 scope+南京云git diff，给出**受影响功能+调用方+建议测试场景+建议部署位置**冻结建议给你看，你批准/取消/微调后才编、才跑、才判定。
+改了代码但想知道"改了哪影响什么、测什么算数"。用 `--scope` 手工 scope 先行：你告诉任务管哪些文件/模块，planner 读 scope+git diff，给出**受影响功能+调用方+建议测试场景+建议部署位置**冻结建议给你看，你批准/取消/微调后才编、才跑、才判定。
 
 ```
 /mccl-impact-run "修了 symm 的一个 case" --scope=src/hw/symm.c,src/hw/slice_nic/
