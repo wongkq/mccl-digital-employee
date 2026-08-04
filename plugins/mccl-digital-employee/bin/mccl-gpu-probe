@@ -165,7 +165,9 @@ check_occupancy() {
   local occ_arr="" host out procs rc
   for host in $MCCL_NODES; do
     out=$(ssh_exec_read "$host" "mx-smi 2>&1"); rc=$?
-    if [ "$rc" -ne 0 ] || [ -z "${out:-}" ]; then
+    # ssh 本体失败 = rc 非 0 且 输出里没有 mx-smi 的特征行（Attached GPUs）——归 error。
+    # rc 非 0 但输出有效（如 mx-smi 新版返回非 0 但正常打印 GPU 列表）→ 不算 ssh 失败，按输出正常解析占用。
+    if [ "$rc" -ne 0 ] && ! printf '%s' "$out" | grep -q 'Attached GPUs'; then
       # ssh 失败（不可达 / 密钥未配）→ 记录并立即归 error，不静默判空闲
       OCC_FAILURES="${OCC_FAILURES}${OCC_FAILURES:+$'\n'}$host ssh 失败（不可达/密钥未配）"
       occ_arr="${occ_arr%,}"
