@@ -1,4 +1,5 @@
 ---
+name: mccl-bench-queue
 description: bench 队列控制（提交/查看/暂停/终止/恢复）-- 子系统⑥⑦
 ---
 

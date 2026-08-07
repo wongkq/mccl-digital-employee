@@ -1,4 +1,5 @@
 ---
+name: mccl-gpu-info
 description: 快查 GPU 基础信息：每主机一张 12 字段明细表（GPU 数/型号/驱动/MACA/显存/温度/功耗/Util/State/进程），出表 + 落到 /tmp/gpu-info-<ts>.html。想查 GPU 基础信息/看看 GPU 有没有被占用/拓扑/bin/温度/功耗 用这个；不跑带宽基准。
 ---
 

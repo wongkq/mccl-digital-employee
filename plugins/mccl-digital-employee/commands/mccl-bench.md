@@ -1,4 +1,5 @@
 ---
+name: mccl-bench
 description: 跑性能测试矩阵（AI推断场景）+ 多轮统计 + 可选前后对比报告
 ---
 

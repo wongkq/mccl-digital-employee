@@ -1,4 +1,5 @@
 ---
+name: mccl-run
 description: 跑一轮完整的MCCL开发验证流水线：开发→监督→测试→监督→报告→监督
 ---
 

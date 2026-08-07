@@ -221,8 +221,10 @@ json.dump(d,open(sys.argv[1],"w"),ensure_ascii=False,indent=2)
 resolve_roots() {
   command -v python3 >/dev/null 2>&1 || { echo "mccl-queue-scheduler: 需要 python3" >&2; return 1; }
   REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "mccl-queue-scheduler: 不在 git 仓库内" >&2; return 1; }
-  # TOOLKIT_ROOT 解析（同 mccl-toolkit-root 逻辑）
-  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/references/mccl-safety.md" ]; then
+  # TOOLKIT_ROOT 解析（同 mccl-toolkit-root 逻辑；Qoder/Claude Code 两套插件环境变量都认）
+  if [ -n "${QODER_PLUGIN_ROOT:-}" ] && [ -f "${QODER_PLUGIN_ROOT}/references/mccl-safety.md" ]; then
+    TOOLKIT_ROOT="${QODER_PLUGIN_ROOT}"
+  elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/references/mccl-safety.md" ]; then
     TOOLKIT_ROOT="${CLAUDE_PLUGIN_ROOT}"
   else
     TOOLKIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

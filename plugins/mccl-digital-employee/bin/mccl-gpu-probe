@@ -86,6 +86,9 @@ PY
 # ===================== 环境与根解析 =====================
 
 resolve_toolkit_root() {
+  if [ -n "${QODER_PLUGIN_ROOT:-}" ] && [ -f "${QODER_PLUGIN_ROOT}/references/mccl-safety.md" ]; then
+    echo "${QODER_PLUGIN_ROOT}"; return 0
+  fi
   if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/references/mccl-safety.md" ]; then
     echo "${CLAUDE_PLUGIN_ROOT}"; return 0
   fi

@@ -1,4 +1,5 @@
 ---
+name: mccl-impact-run
 description: 影响驱动验证（子系统④）：scope 驱动的影响分析→编译→tester/supervisor 判定。不动原主控文档子代理的编排。
 ---
 

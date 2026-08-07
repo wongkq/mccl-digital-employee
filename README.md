@@ -221,6 +221,36 @@ bash <插件根>/tests/check.sh
 
 **看当前装的是哪个版本 / 有没有加载错误**：`/plugin` → **Installed** 标签，或 `claude plugin list`。
 
+## 平台支持：Claude Code 与 Qoder CN CLI
+
+本工具包**同时支持 Claude Code 和 Qoder CN CLI**（阿里云，原通义灵码）。两者的插件/智能体约定在本仓库里是同一份布局：
+
+| 仓库里的东西 | Claude Code | Qoder CN CLI |
+|---|---|---|
+| `.claude-plugin/marketplace.json` | ✅ marketplace 索引 | 忽略 |
+| `.qoder-plugin/plugin.json`（`plugins/mccl-digital-employee/` 下） | 忽略 | ✅ 插件 manifest（`plugins install` 直接装目录） |
+| `agents/*.md`（frontmatter `name`/`description`/`tools`） | ✅ 子代理 | ✅ Subagent（同格式，`tools` 支持逗号分隔串） |
+| `commands/*.md`（frontmatter `name`+`description`） | ✅ 斜杠命令（只读 `description`，忽略 `name`） | ✅ Prompt 命令（要求 `name`+`description`） |
+| `bin/` | ✅ 脚本 | ✅ 插件约定目录 |
+| `.claude/settings.json` deny | ✅ 本机命令护栏 | ❌ 不读取（Qoder 用自己的权限配置，见下） |
+
+**Qoder CN CLI 安装**（本仓库不依赖 marketplace，插件本体是目录，直接装）：
+
+```bash
+qoderclicn plugins validate <工具包根>/plugins/mccl-digital-employee   # 结构自检
+qoderclicn plugins install <工具包根>/plugins/mccl-digital-employee
+qoderclicn plugins list          # 确认装上
+qoderclicn agents list           # 看 9 个子代理是否注册
+# TUI 里 /commands 看 6 个命令；改动后 /agents reload、/commands 重载
+```
+
+**两个已知的平台差异（不影响主流水线，但要知情）**：
+
+1. **权限护栏只对 Claude Code 生效。** `.claude/settings.json` 的 deny（`git push`/`reboot`/`shutdown`/`halt`/`init`）是 Claude Code 的机制，Qoder 不读取它——Qoder 下这些护栏只靠 agent 提示词硬禁令 + 监督员审计两层软约束补位（本仓库的分层防御本来就如此设计，只是 Claude Code 多了一层 harness 强制）。想在 Qoder 下补硬护栏，用 Qoder 自己的权限配置（如 Subagent 的 `permissionMode`）另行配置。
+2. **hooks 不互通。** `.claude/settings.local.json` 的 timing 钩子是 Claude Code 的；Qoder 用插件内的 `hooks/hooks.json`。timing 日志只是开发期自测工具，不影响插件功能。
+
+插件根定位（`bin/mccl-toolkit-root`）三路兼容：优先 `$QODER_PLUGIN_ROOT` 或 `$CLAUDE_PLUGIN_ROOT`（谁被设置且有效用谁），都无效则用 `$BASH_SOURCE` 反推——所以两种装法、两个平台都能定位到 `references/`。`tests/check.sh` 不变式11 三路自举校验、不变式28 守护命令 `name` 字段，双端兼容性被静态不变式持续保证。
+
 ## 换机器 / 换节点IP
 
 IP变了只改一个文件：`mccl-env.json`（不入库）。改完跑一次：
@@ -527,7 +557,7 @@ CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存
 |---|---|---|
 | agent卡住不动、ssh没反应 | 密钥没配好，裸ssh弹密码提示，而agent背后没有人输密码 | 跑`bash <插件>/bin/mccl-setup-ssh`。所有ssh已带`$MCCL_SSH_OPTS`（`BatchMode=yes`）会立刻失败而不是挂起（`references/mccl-remote-ops.md`§0.5），若仍挂起说明有裸ssh漏网，跑`bash <插件>/tests/check.sh`第13条排查 |
 | preflight md5不一致，测试不跑（多节点模式第2条） | **最常见**。编译节点`$MCCL_MACA_LIB_DIR/libmccl.so`没更新 | 这是`测试.md`原始工作流的洞：它记载的分发只有三条scp（发给非编译节点）加编译节点容器内到`/opt/maca/lib`的cp，编译节点的`$MCCL_MACA_LIB_DIR`从没写过，且全程只有`make -j50`没有`make install`。补`references/mccl-remote-ops.md`第3节"动作②"那条命令：`ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_MACA_LIB_DIR/'"` |
-| agent说"找不到references/" | `TOOLKIT_ROOT`没解析对 | 插件装法应由`bin/mccl-toolkit-root`解析（优先`$CLAUDE_PLUGIN_ROOT`，兜底`$BASH_SOURCE`反推）；拷贝装法退回`$REPO_ROOT`。确认`references/`确实在插件根或仓库根下（`bin/mccl-toolkit-root`） |
+| agent说"找不到references/" | `TOOLKIT_ROOT`没解析对 | 插件装法应由`bin/mccl-toolkit-root`解析（优先`$QODER_PLUGIN_ROOT`/`$CLAUDE_PLUGIN_ROOT`，兜底`$BASH_SOURCE`反推）；拷贝装法退回`$REPO_ROOT`。确认`references/`确实在插件根或仓库根下（`bin/mccl-toolkit-root`） |
 | 主控直接停，提示`mccl-env.json`不存在 | 没从`.example`拷贝 | `cp <插件>/mccl-env.json.example ./mccl-env.json`并填值（`commands/mccl-run.md`第2节第1点） |
 | agent拒绝执行，说拓扑不受支持 | `MCCL_NNODES`不是1/4/8，**或**每节点卡数`MCCL_GPUS_PER_NODE`不是8而节点数是4/8（如"4节点2卡"） | 能测对称内存的组合只有 (8卡,4节点) 和 (8卡,8节点)——`nodeSize=8`是PCIe Switch硬件决定、代码硬编码的。偏离这个的多节点配置，`CliqueManager::IsSupported()`不匹配，对称内存不启用、静默fallback到Ring/Tree，**测出来的不是你以为在测的东西**，拒绝比跑更安全。单节点非8卡（如单节点2卡）是例外：能跑基础AllReduce冒烟，agent会在报告里声明未覆盖对称内存（`agents/mccl-developer.md`第6步、`agents/mccl-tester.md`第2节） |
 | 报告里写"缺失"，日志明明跑了 | 日志落在远端了 | `ssh`的重定向必须在引号**外面**：`ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<命令>" > "$RUN_DIR/build.log" 2>&1`，写成`ssh ... "<命令> > build.log 2>&1"`日志就留在远端（`references/mccl-remote-ops.md`§0.6）。`mccl-reporter`没有Bash、取不了远程文件，日志不在本地对它等同不存在 |
@@ -597,7 +627,7 @@ docs/superpowers/{specs,plans}/      设计与实施计划
 
 4. **`references/`里的领域知识来自`测试.md`的提炼，可能有偏差，且反映的是某一时间点的环境状态。** `测试.md`本身是私有材料（不入库，见下），记录的编译路径选型、拓扑常量、内核选型边界等信息对应的是提炼那一刻的真实环境。如果真实仓库所在的硬件拓扑、MACA版本、内核路径发生变化，`references/`里对应的内容需要人工同步更新，工具包本身不会自动感知环境漂移。
 
-5. **`$CLAUDE_PLUGIN_ROOT`在agent提示词正文里是否会被展开，官方文档未说明、本工具包未实测。** 这不是"验证过它不work"，而是一个未知数——我们没有找到官方文档明确保证agent的Markdown提示词正文（而非仅limited于hook/MCP配置等场景）里出现的`$CLAUDE_PLUGIN_ROOT`会被harness展开成实际路径。为了不把整套双根模型建在一个不确定的行为上，`bin/mccl-toolkit-root`把`$CLAUDE_PLUGIN_ROOT`当成"如果有就优先用"的加分项，但不依赖它——真正兜底的是用`$BASH_SOURCE`反推`../`，这条路径在两种装法下都能从脚本自身的实际位置推出正确答案，不依赖任何环境变量是否被展开。这是绕开了一处不确定性，不是确认了它一定不work或一定work。
+5. **`$QODER_PLUGIN_ROOT`/`$CLAUDE_PLUGIN_ROOT`在agent提示词正文里是否会被展开，官方文档未说明、本工具包未实测。** 这不是"验证过它不work"，而是一个未知数——我们没有找到官方文档明确保证agent的Markdown提示词正文（而非仅limited于hook/MCP配置等场景）里出现的插件根环境变量会被harness展开成实际路径。为了不把整套双根模型建在一个不确定的行为上，`bin/mccl-toolkit-root`把两个插件根环境变量当成"如果有就优先用"的加分项，但不依赖它们——真正兜底的是用`$BASH_SOURCE`反推`../`，这条路径在两种装法下都能从脚本自身的实际位置推出正确答案，不依赖任何环境变量是否被展开。这是绕开了一处不确定性，不是确认了它一定不work或一定work。
 
 6. **单节点/8节点拓扑下，agent的实际行为同样从未端到端验证过（与第1条同一根因）。** 节点数可配置化改造改的是agent提示词里的判断逻辑（按`$MCCL_NNODES`选分支）和`mccl-env.json.example`+`bin/mccl-env-load.py`的派生关系，`tests/check.sh`能验证的也仅限于派生量本身算对了（不变式12）——单节点模式下开发/测试agent会不会真的只做1份而非N+1份md5核对、拓扑不支持时会不会真的停止而不是"顺手跑一下"、覆盖度声明会不会真的写进`test-result.md`，这些都需要真实单节点或8节点集群才能验证，本仓库同样不具备。`bin/mccl-setup-ssh`目前也只对4节点配置的免密链路做了针对性检查，未随本次改造同步扩展（见上方"节点数配置"一节末尾）。
 

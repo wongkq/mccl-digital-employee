@@ -141,13 +141,16 @@ if [ ! -f "$tk" ]; then
 elif [ ! -x "$tk" ]; then
   err "$tk 不可执行"
 else
-  # 显式unset CLAUDE_PLUGIN_ROOT，强制走BASH_SOURCE反推兜底路径；
-  # 从插件根本身跑，期望输出就是插件根——验证两种装法里"项目内拷贝"那种（不依赖$CLAUDE_PLUGIN_ROOT）确实成立。
-  out="$(cd "$PLUGIN_ROOT" && env -u CLAUDE_PLUGIN_ROOT "$tk" 2>/dev/null)"
-  if [ "$out" = "$PLUGIN_ROOT" ]; then
-    ok "bin/mccl-toolkit-root 自举校验通过（输出=$out）"
+  # 三路自举验证：QODER_PLUGIN_ROOT / CLAUDE_PLUGIN_ROOT / BASH_SOURCE 兜底。
+  # 显式unset 两个插件环境变量，强制走BASH_SOURCE反推兜底路径——验证"项目内拷贝"装法
+  # （两种工具都不依赖插件环境变量）确实成立；再分别设 QODER/CLAUDE 环境变量验插件装法。
+  boot_out="$(cd "$PLUGIN_ROOT" && env -u CLAUDE_PLUGIN_ROOT -u QODER_PLUGIN_ROOT "$tk" 2>/dev/null)"
+  qoder_out="$(cd "$PLUGIN_ROOT" && env -u CLAUDE_PLUGIN_ROOT QODER_PLUGIN_ROOT="$PLUGIN_ROOT" "$tk" 2>/dev/null)"
+  claude_out="$(cd "$PLUGIN_ROOT" && env -u QODER_PLUGIN_ROOT CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" "$tk" 2>/dev/null)"
+  if [ "$boot_out" = "$PLUGIN_ROOT" ] && [ "$qoder_out" = "$PLUGIN_ROOT" ] && [ "$claude_out" = "$PLUGIN_ROOT" ]; then
+    ok "bin/mccl-toolkit-root 三路自举校验通过（QODER/CLAUDE_PLUGIN_ROOT/BASH_SOURCE 兜底）"
   else
-    err "bin/mccl-toolkit-root 自举校验失败：期望 $PLUGIN_ROOT，实得 '$out'"
+    err "bin/mccl-toolkit-root 自举校验失败：期望 $PLUGIN_ROOT，实得 boot='$boot_out' qoder='$qoder_out' claude='$claude_out'"
   fi
 fi
 
@@ -418,6 +421,21 @@ else
     grep -q -- "$kw" "$ic" || { err "$ic 未提及 $kw"; fail27=1; }
   done
   [ "$fail27" = "1" ] || ok "mccl-impact-run 命令调度关键字齐（--scope + planner并）"
+fi
+
+# --- 28. 命令 frontmatter 必须含 name（Qoder 插件规范要求 name+description 必填；
+#         Claude Code 只读 description、忽略多余字段，故 name 双端安全） ---
+cmdbad=""
+for cf in "$PLUGIN_ROOT"/commands/*.md; do
+  [ -e "$cf" ] || continue
+  if ! awk '/^---$/{n++; next} n==1' "$cf" | grep -q '^name:'; then
+    cmdbad="$cmdbad $(basename "$cf")"
+  fi
+done
+if [ -n "$cmdbad" ]; then
+  err "命令缺 name 字段（Qoder 兼容必需）:$cmdbad"
+else
+  ok "命令 frontmatter 均含 name（Qoder/Claude Code 双端兼容）"
 fi
 
 echo

@@ -1,4 +1,5 @@
 ---
+name: mccl-skill-sync
 description: skill 经验同步调度入口（手动批准或定时 auto）——把本仓库未提交的经验改动（坑/场景/模板/文档/脚本）commit+push 到 gitlab/github
 ---
 
