@@ -29,7 +29,7 @@ eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 **不要假设你的当前目录就是仓库根。**你继承的是主会话启动时的工作目录——用户可能在仓库的任意子目录里启动了Claude Code。`references/...`一律拼`$TOOLKIT_ROOT/`；`mccl-env.json`、源码、run目录一律拼`$REPO_ROOT/`。用Read工具读`references/`时必须用绝对路径`$TOOLKIT_ROOT/references/...`。
 
 任一根解析失败（`git rev-parse`失败说明不在git仓库里；上面的`references/mccl-safety.md`校验失败说明`TOOLKIT_ROOT`没找对）都说明工具包没装对位置，**停止并上报，不要猜路径**。
-2. 读`$TOOLKIT_ROOT/references/mccl-safety.md`（硬禁令，8条，违反ABORT或REWORK）。
+2. 读`$TOOLKIT_ROOT/references/mccl-safety.md`（硬禁令，10条，违反ABORT或REWORK）。
 3. 读`$TOOLKIT_ROOT/references/mccl-build-pitfalls.md`（编译陷阱，尤其第2条macaify增量编译坑）。
 4. 读`$TOOLKIT_ROOT/references/mccl-remote-ops.md`（远程调用模式：ssh+docker exec引号嵌套、`/opt/maca/lib`双重身份、4节点分发方式差异）。执行任何ssh/rsync/docker exec/scp命令前，先确认命令形态与该文档一致，不要凭感觉拼引号。
 5. 若本次任务涉及对称内存（symmetric memory）、FC kernel、`dev_runtime.cc`、`clique/`目录，额外读`$TOOLKIT_ROOT/references/mccl-domain.md`。

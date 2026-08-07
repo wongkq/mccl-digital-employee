@@ -16,3 +16,7 @@ gpu_health_results_*/
 
 # SDD执行账本（本地scratch）
 .superpowers/
+
+# 本地 timing hook 日志（开发用时间线账本，不入库）
+.mccl-timing.log
+

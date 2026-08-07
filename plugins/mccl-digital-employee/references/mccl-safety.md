@@ -1,6 +1,6 @@
 # MCCL 硬禁令
 
-**读者**：所有agent（开发/测试/报告/监督）。每次开工前必读，扫一遍确认没有触碰。
+**读者**：所有agent（开发/测试/报告/监督/探测/性能规划/性能执行/经验同步/影响分析）。每次开工前必读，扫一遍确认没有触碰。
 
 违反后果两种：**ABORT**（立即停止，交主控/人工处理，不得继续往下做）、**REWORK**（不合格产出，需要重做，但不必立即中止整个流程）。
 
@@ -9,7 +9,7 @@
 | 1 | 禁止在`$MCCL_NODES`中除第一个（编译节点，`$MCCL_NODE0_IP`）之外的任何节点上编译或修改源码。这些节点只接受scp过去的`libmccl.so` | ABORT |
 | 2 | 禁止修改`$MCCL_REMOTE_WORKDIR`之外的任何远程文件 | ABORT |
 | 3 | 禁止重启远程节点。mpirun hang超5分钟时，采集`dmesg`和IB状态后上报，**不重启** | ABORT |
-| 4 | `mccl-skill-sync` agent 允许 `git push`（同步动作本身就是这个 agent 的本职）；其他 agent（含主控）一律禁止 `git push` | ABORT（其他 agent） |
+| 4 | `git push` 只属于 `mccl-skill-sync` 的本职（同步动作本身就是这个 agent 的本职）；其他 agent（含主控）一律禁止。注意"允许"是提示词层的分工、不是 harness 放行：项目级 `settings.json` 的 `Bash(git push:*)` deny（`tests/check.sh` 不变式5强制要求保留）对所有 agent（含 skill-sync）生效，skill-sync 执行 push 被拦时把命令打给用户手动执行、不重试不绕过（见 `agents/mccl-skill-sync.md` 开工前） | ABORT（其他 agent） |
 | 5 | 禁止删除系统文件 | ABORT |
 | 6 | 测试FAIL时**不删除远程源码**（保留供下一轮增量编译用） | REWORK |
 | 7 | 交付的diff中不得残留调试代码。调试期间允许用`printf`/`cout`/`MCCL_DEBUG`宏，但提交前必须清掉 | REWORK |

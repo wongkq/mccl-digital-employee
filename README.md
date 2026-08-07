@@ -1,12 +1,12 @@
 # MCCL数字员工工具包
 
-MCCL（MetaX Collective Communications Library）开发验证流水线的数字员工工具包：四个agent + 三道监督卡点 + 分层重试，用来在真实MCCL仓库（`mccl_dev_supernode`）里跑一轮"改代码 → 上集群验证 → 出报告"的完整闭环，并让每一步的产出都经独立监督员审计。节点数可配置（1/4/8三档，见下方"节点数配置"一节），不同档位覆盖的验证范围不同。
+MCCL（MetaX Collective Communications Library）开发验证流水线的数字员工工具包：四个核心子代理 + 三道监督卡点 + 分层重试，另附 GPU 门禁、性能矩阵、影响分析、经验同步等扩展角色，用来在真实MCCL仓库（`mccl_dev_supernode`）里跑一轮"改代码 → 上集群验证 → 出报告"的完整闭环，并让每一步的产出都经独立监督员审计。节点数可配置（1/4/8三档，见下方"节点数配置"一节），不同档位覆盖的验证范围不同。
 
 **本仓库只存agent定义与静态自检，不产生运行产物。** 运行产物（`.mccl-runs/`）在拷贝到真实仓库、配好`mccl-env.json`之后才会出现。
 
 ## 这是什么
 
-四个角色：
+四个核心角色（`/mccl-run` 主流水线；GPU 门禁、性能矩阵、影响分析、经验同步等扩展角色见后方各自小节）：
 
 | Agent | 职责 | 工具 |
 |---|---|---|
@@ -494,7 +494,7 @@ CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存
 **自动**：`/mccl-skill-sync auto`
 > 经 `tests/check.sh` 硬闸门 → `git add -u`（只收已跟踪修改，绝不自动打包 untracked 新文件）→ commit → push 到每个已配置远端。供CronCreate 注册：`CronCreate cron="0 18 * * *" prompt="/mccl-skill-sync auto"`。
 
-**safety 第 4 条已改**：`mccl-skill-sync` agent 允许 `git push`（同步是它本职工作）；其他 agent（含主控）一律禁止。
+**safety 第 4 条已改**：`git push` 只属于 `mccl-skill-sync` 的本职（同步是它本职工作）；其他 agent（含主控）一律禁止。**注意这里的"允许"是提示词层的分工，不是 harness 放行**：`.claude/settings.json` 的 `Bash(git push:*)` deny（`tests/check.sh` 不变式5强制要求保留）对所有 agent（含 skill-sync）生效，skill-sync 执行 push 时命令会被拦下——被拦时它不重试、不绕过，把具体 push 命令打给你手动执行（和 `mccl-setup-ssh` 配密钥同一交互模式），输出 `SYNC:push-blocked`。这是设计：push 动作经 skill-sync 之手交到人面前，天然多一道人工把关。
 
 **已知边界**：
 - push 失败：commit 留在本地不动、不自动重试（重试是你的判断，不是 agent 的）。
@@ -556,18 +556,34 @@ CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存
                                       插件带不走，留给用户合并进自己仓库
 plugins/mccl-digital-employee/
 ├── .claude-plugin/plugin.json       插件清单
-├── bin/  mccl-toolkit-root（输出TOOLKIT_ROOT）、mccl-setup-ssh（免密自检）、mccl-env-load.py（加载mccl-env.json算派生）
-├── agents/            mccl-developer.md / mccl-tester.md / mccl-reporter.md / mccl-supervisor.md
-├── commands/          mccl-run.md（编排入口）
+├── bin/
+│   ├── mccl-toolkit-root            输出TOOLKIT_ROOT（双根模型的关键）
+│   ├── mccl-env-load.py             加载mccl-env.json、算7个派生量
+│   ├── mccl-setup-ssh               免密自检（本机→NODE0链路）
+│   ├── mccl-gpu-probe               GPU环境探测原语（topology/占用/bin/带宽→gpu-verdict.json）
+│   ├── mccl-bench-stats.py          bench性能聚合纯函数（mean/min/max→bench-stats.json）
+│   └── mccl-queue-scheduler         bench队列调度器（flock+cron触发）
+├── agents/
+│   ├── mccl-developer.md            开发（改码/同步/编译/分发）
+│   ├── mccl-tester.md               测试（preflight+mpirun场景A/B）
+│   ├── mccl-reporter.md             报告（禁Bash，物理隔离）
+│   ├── mccl-supervisor.md           监督（dev/test/report三道卡点）
+│   ├── mccl-prober.md               GPU环境门禁
+│   ├── mccl-bench-planner.md        性能场景规划
+│   ├── mccl-bench-runner.md         性能矩阵执行+聚合
+│   ├── mccl-impact-planner.md       影响驱动验证规划
+│   └── mccl-skill-sync.md           经验同步（唯一允许git push的角色）
+├── commands/         mccl-run / mccl-bench / mccl-bench-queue / mccl-gpu-info / mccl-impact-run / mccl-skill-sync
 ├── references/
 │   ├── mccl-domain.md               领域知识（对称内存、FC kernel等）
 │   ├── mccl-build-pitfalls.md       编译陷阱（含macaify增量编译坑）
-│   ├── mccl-safety.md                硬禁令（8条，违反则ABORT或REWORK）
+│   ├── mccl-safety.md                硬禁令（10条，违反则ABORT或REWORK）
 │   ├── mccl-remote-ops.md            远程调用模式手册（ssh跳板、docker exec引号嵌套、按$MCCL_NODES循环的分发差异）
+│   ├── bench-report-template.md     /mccl-bench 报告模板
 │   └── supervisor-checklists/
-│       ├── dev.md      test.md      report.md      三道卡点各自的监督checklist
+│       ├── dev.md      test.md      report.md      bench.md   各卡点监督checklist
 ├── mccl-env.json.example  14个raw键模板（_comments 带详细说明）
-└── tests/check.sh          13条静态不变式自检（仓库级+插件级）
+└── tests/check.sh          27条静态不变式自检（仓库级+插件级）
 docs/superpowers/{specs,plans}/      设计与实施计划
 ```
 

@@ -18,7 +18,7 @@ TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 ```
 两个根不能混用：`TOOLKIT_ROOT` 下是 `references/`、`bin/mccl-gpu-probe`；`REPO_ROOT` 下是 `mccl-env.json`、MCCL源码、`.mccl-runs/`、`gpu_health_check.sh`。任一根解析失败都停止并上报，不要猜路径。
-2. 读 `$TOOLKIT_ROOT/references/mccl-safety.md`（硬禁令9条，**第9条"探测器只读"是本轮最容易踩的**：不杀进程、不改文件、不重启节点，发现占用只上报）。
+2. 读 `$TOOLKIT_ROOT/references/mccl-safety.md`（硬禁令10条，**第9条"探测器只读"是本轮最容易踩的**：不杀进程、不改文件、不重启节点，发现占用只上报）。
 
 ## 2. 调用契约
 
