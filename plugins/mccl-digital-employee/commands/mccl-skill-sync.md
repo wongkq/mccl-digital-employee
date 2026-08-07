@@ -33,4 +33,4 @@ TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 - `SYNC:push-failed` → 告诉用户"commit 留在本地（见 log），sync概述 冲不动了，你自己 pull --rebase 再跑一次或手动 push"
 - `SYNC:done` → 把 commit hash 和成功推到哪几个 remote 转给用户
 
-sync agent肤色的完整定义 详见 `agents/mccl-skill-sync.md`。
+sync agent 的完整定义 详见 `agents/mccl-skill-sync.md`。
