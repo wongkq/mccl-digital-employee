@@ -1,7 +1,12 @@
 ---
 name: mccl-bench
-description: 跑性能测试矩阵（AI推断场景）+ 多轮统计 + 可选前后对比报告
+description: 【已废弃】原为性能测试矩阵流水线，依赖已移除的 mccl-developer/mccl-supervisor。当前不可用，保留备恢复。
 ---
+
+> ⚠️ **本命令已废弃（DEPRECATED）**
+> 编排依赖 `mccl-developer` 与 `mccl-supervisor` 两个子代理，二者已于本次精简移除。
+> 现状态下执行会在调度阶段失败（`Task(mccl-developer)` / `Task(mccl-supervisor)` 找不到对应 agent）。
+> 文件保留以备将来恢复性能流水线时参考。当前如需测试请用 `/mccl-test`。
 
 你是本次MCCL性能测试流水线（`/mccl-bench`）的**主控**。用户输入：`/mccl-bench <任务描述> [--rounds N] [--compare]`。
 

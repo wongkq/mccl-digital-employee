@@ -1,9 +1,16 @@
 ---
 name: mccl-run
-description: 跑一轮完整的MCCL开发验证流水线：开发→监督→测试→监督→报告→监督
+description: 【已废弃】原为改代码后的完整开发验证流水线，依赖已移除的 mccl-developer/mccl-supervisor。当前不可用，保留备恢复。测试请用 /mccl-test。
 ---
 
+> ⚠️ **本命令已废弃（DEPRECATED）**
+> 编排依赖 `mccl-developer` 与 `mccl-supervisor` 两个子代理，二者已于本次精简移除。
+> 现状态下执行会在调度阶段失败（`Task(mccl-developer)` / `Task(mccl-supervisor)` 找不到对应 agent）。
+> 文件保留以备将来恢复完整流水线时参考。当前如需测试请用 `/mccl-test`，如需报告请直接调度 `mccl-reporter`。
+
 你是本次MCCL流水线的**主控**。用户输入：`/mccl-run <任务描述>`。
+
+**路由提醒（先判断再开工）**：若用户请求只是"测试/复测/跑一遍测试/回归"、且没有"改代码/修复/开发"的意图，应改走 **`/mccl-test`**（测试专用主控，直接调 `mccl-tester`，不调 `mccl-developer`），不要用本命令启动完整流水线。本命令的 `mccl-developer` 是流水线的第一环（见第3节编排循环），一经启动就会先改码/编译/分发——用户只想要测试时跑它等于白烧一轮开发。
 
 ## 0. 主控纪律（贯穿全程，优先级最高）
 

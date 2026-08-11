@@ -116,23 +116,22 @@ else
   ok "mccl-reporter 无 Bash"
 fi
 
-# --- 9. 编排命令引用的 agent 均已定义 ---
+# --- 9. /mccl-run 已标注废弃（依赖已移除的 developer/supervisor）---
 cf="$PLUGIN_ROOT/commands/mccl-run.md"
 if [ ! -f "$cf" ]; then
   err "$cf 缺失"
+elif grep -qE "已废弃|DEPRECATED" "$cf"; then
+  ok "/mccl-run 已标注废弃"
 else
-  for a in mccl-developer mccl-tester mccl-reporter mccl-supervisor; do
-    grep -q "$a" "$cf" || err "$cf 未引用 agent: $a"
-    [ -f "$PLUGIN_ROOT/agents/$a.md" ] || err "agent 定义缺失: $PLUGIN_ROOT/agents/$a.md"
-  done
-  ok "编排命令引用的 agent 均已定义"
+  err "$cf 未标注废弃（依赖已移除的 mccl-developer/mccl-supervisor）"
 fi
 
-# --- 10. checklist 三份齐全 ---
-for s in dev test report bench; do
-  [ -f "$PLUGIN_ROOT/references/supervisor-checklists/$s.md" ] || err "checklist 缺失: $s.md"
-done
-ok "supervisor checklist 齐全"
+# --- 10. supervisor-checklists 已随 supervisor 移除 ---
+if [ -d "$PLUGIN_ROOT/references/supervisor-checklists" ]; then
+  err "supervisor-checklists 目录仍存在，但 mccl-supervisor 已移除"
+else
+  ok "supervisor-checklists 已随 supervisor 移除"
+fi
 
 # --- 11. bin/mccl-toolkit-root 存在、可执行，且自举校验通过 ---
 tk="$PLUGIN_ROOT/bin/mccl-toolkit-root"
@@ -272,16 +271,14 @@ else
   fi
 fi
 
-# --- 17. /mccl-bench 命令引用的 agent 均已定义 ---
+# --- 17. /mccl-bench 已标注废弃（依赖已移除的 developer/supervisor）---
 bcf="$PLUGIN_ROOT/commands/mccl-bench.md"
 if [ ! -f "$bcf" ]; then
   err "$bcf 缺失"
+elif grep -qE "已废弃|DEPRECATED" "$bcf"; then
+  ok "/mccl-bench 已标注废弃"
 else
-  for a in mccl-bench-planner mccl-bench-runner mccl-developer mccl-reporter mccl-supervisor mccl-prober; do
-    grep -q "$a" "$bcf" || err "$bcf 未引用 agent: $a"
-    [ -f "$PLUGIN_ROOT/agents/$a.md" ] || err "agent 定义缺失: $a.md"
-  done
-  ok "/mccl-bench 引用的 agent 均已定义"
+  err "$bcf 未标注废弃"
 fi
 
 # --- 18. mccl-bench-planner frontmatter 完整 + 含 Bash + 正文含"选择理由"必填提示 ---

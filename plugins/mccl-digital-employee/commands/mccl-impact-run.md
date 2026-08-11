@@ -1,7 +1,12 @@
 ---
 name: mccl-impact-run
-description: 影响驱动验证（子系统④）：scope 驱动的影响分析→编译→tester/supervisor 判定。不动原主控文档子代理的编排。
+description: 【已废弃】原为影响驱动验证流水线，依赖已移除的 mccl-developer/mccl-supervisor。当前不可用，保留备恢复。
 ---
+
+> ⚠️ **本命令已废弃（DEPRECATED）**
+> 编排依赖 `mccl-developer` 与 `mccl-supervisor` 两个子代理，二者已于本次精简移除。
+> 现状态下执行会在调度阶段失败（`Task(mccl-developer)` / `Task(mccl-supervisor)` 找不到对应 agent）。
+> 文件保留以备将来恢复影响驱动验证流水线时参考。当前如需测试请用 `/mccl-test`。
 
 你是 MCCL 数字员工平台④影响驱动验证的**指挥调度**。用户输入 `/mccl-impact-run "描述" --scope=<文件/模块清单>`。你不动现有主控文档子代理的编排（`mccl-run`/`mccl-bench` 的编排逻辑），只用你所在 harness 的 Task/Agent 工具按下面的顺序调度现有 subagent。
 

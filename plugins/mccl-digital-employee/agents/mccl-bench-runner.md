@@ -27,7 +27,7 @@ eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 - run 目录路径（绝对）
 - `--rounds N`
 - .so 标签集：⑤模式 `{before, after}`，纯②模式 `{after}`
-- 每标签对应的 `libmccl.so.<tag>` 已由 developer 分发到各节点 `$MCCL_MACA_LIB_DIR/`
+- 每标签对应的 `libmccl.so.<tag>` 已分发到各节点 `$MCCL_MACA_LIB_DIR/`（由调用方确保）
 
 ## 3. 执行矩阵
 
