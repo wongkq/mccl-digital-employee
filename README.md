@@ -2,10 +2,10 @@
 
 > ⚠️ **2026-08 精简：已移除 `mccl-developer` 与 `mccl-supervisor` 两个子代理。**
 > 依赖它们的完整开发验证流水线命令 `/mccl-run`、`/mccl-bench`、`/mccl-impact-run` 已标注废弃（编排会断，文件保留备恢复）。
-> 当前可用核心：`/mccl-test`（测试）+ `mccl-reporter`（报告）+ `/mccl-gpu-info`（GPU 探测）+ `/mccl-skill-sync`（经验同步）+ `/mccl-bench-queue`。
+> 当前可用核心：`/mccl-test`（测试+报告一条龙）+ `/mccl-gpu-info`（GPU 探测）+ `/mccl-skill-sync`（经验同步）+ `/mccl-bench-queue`。
 > 下方涉及 developer/supervisor/三道卡点的段落均为废弃流水线的历史描述，保留以备将来恢复参考。
 
-MCCL（MetaX Collective Communications Library）数字员工工具包：当前核心是**测试 + 报告**（`/mccl-test` 调 `mccl-tester` 跑测试、`mccl-reporter` 写报告），另附 GPU 门禁（`mccl-prober`）、经验同步等扩展角色。原完整开发验证流水线（含开发/编译/分发与三道独立审计卡点）的 `mccl-developer`/`mccl-supervisor` 已于本次精简移除，相关命令 `/mccl-run`、`/mccl-bench`、`/mccl-impact-run` 标注废弃。节点数可配置（1/4/8三档，见下方"节点数配置"一节），不同档位覆盖的验证范围不同。
+MCCL（MetaX Collective Communications Library）数字员工工具包：当前核心是**测试+报告一条龙**（`/mccl-test` 先调 `mccl-tester` 跑测试、再调 `mccl-reporter` 写报告），另附 GPU 门禁（`mccl-prober`）、经验同步等扩展角色。原完整开发验证流水线（含开发/编译/分发与三道独立审计卡点）的 `mccl-developer`/`mccl-supervisor` 已于本次精简移除，相关命令 `/mccl-run`、`/mccl-bench`、`/mccl-impact-run` 标注废弃。节点数可配置（1/4/8三档，见下方"节点数配置"一节），不同档位覆盖的验证范围不同。
 
 **本仓库只存agent定义与静态自检，不产生运行产物。** 运行产物（`.mccl-runs/`）在拷贝到真实仓库、配好`mccl-env.json`之后才会出现。
 
@@ -18,7 +18,7 @@ MCCL（MetaX Collective Communications Library）数字员工工具包：当前�
 | `mccl-tester` | 按`$MCCL_NNODES`选择模式：多节点（4/8）跑场景A（非对称内存）+ 场景B（对称内存）两个`mpirun`测试；单节点（1）跑单节点冒烟，并在报告里显式声明未覆盖的路径。产出原始日志。不改代码、不重新编译。 | 含Bash |
 | `mccl-reporter` | 读run目录产物，写验证报告，每个数字必须能在原始日志里找到出处，未覆盖场景标"未覆盖"不得推断。 | **无Bash**（见下） |
 
-编排入口（当前可用）：`/mccl-test`（测试专用）。原完整流水线入口 `/mccl-run` 已废弃（依赖已移除的 developer/supervisor），`/mccl-bench`、`/mccl-impact-run` 同样废弃。
+编排入口（当前可用）：`/mccl-test`（测试+报告一条龙）。原完整流水线入口 `/mccl-run` 已废弃（依赖已移除的 developer/supervisor），`/mccl-bench`、`/mccl-impact-run` 同样废弃。
 
 ### 关于`mccl-reporter`禁Bash
 
@@ -326,20 +326,20 @@ bash <插件>/bin/mccl-setup-ssh
 | 你要做什么 | 命令 |
 |---|---|
 | 改完代码要验证 pass/fail（跑2固定场景，服务 commit 决策） | `/mccl-run`【已废弃，依赖已移除的 developer/supervisor】 |
-| 库已编好分发好，只复测/回归（不改代码、不重编） | `/mccl-test [<run目录>]` |
+| 库已编好分发好，复测+出报告（不改代码、不重编） | `/mccl-test [<run目录>]` |
 | 想知道改了哪、影响什么、测什么算数 | `/mccl-impact-run`【已废弃】 |
 | 性能评估/对比（多场景矩阵、多轮统计、--compare 前后库对比） | `/mccl-bench`【已废弃】 |
 | GPU 忙，想提交后让系统排队空闲再跑 + 夜间定时 | `/mccl-bench-queue submit/status/pause/stop/resume` |
 | 加了坑/场景/模板想一键推给同事 | `/mccl-skill-sync`（手动批） / `/mccl-skill-sync auto` |
 | 日常验证 GPU 环境（不跑业务，只看拓扑/占用/带宽达标） | `bash plugins/.../bin/mccl-gpu-probe --mode full` |
 
-**路由规则**：用户说"测试/复测/跑一遍测试/回归"而没提改代码 -> 用 `/mccl-test`（只测不开发）。原 `/mccl-run`（改代码->上集群验证->出报告完整闭环）已废弃；如需改代码后验证，需手动完成开发/编译/分发后再用 `/mccl-test` 测试、`mccl-reporter` 出报告。
+**路由规则**：用户说"测试/复测/跑一遍测试/回归"而没提改代码 -> 用 `/mccl-test`（测完自动出报告，不开发）。原 `/mccl-run`（改代码->上集群验证->出报告完整闭环）已废弃；如需改代码后验证，需手动完成开发/编译/分发后再用 `/mccl-test` 测试+出报告。
 
 下面按顺序讲清每条命令怎么用。`/mccl-run`、`/mccl-impact-run`、`/mccl-bench` 已废弃（见各节标注），`/mccl-bench-queue`、`/mccl-skill-sync` 细节见后方各自小节。
 
 ### `/mccl-run`【已废弃】
 
-> ⚠️ 已废弃：编排依赖已移除的 `mccl-developer`/`mccl-supervisor`，现状态下执行会在调度阶段失败。文件保留备恢复。测试用 `/mccl-test`，报告调 `mccl-reporter`。
+> ⚠️ 已废弃：编排依赖已移除的 `mccl-developer`/`mccl-supervisor`，现状态下执行会在调度阶段失败。文件保留备恢复。测试+报告用 `/mccl-test`。
 
 ```
 /mccl-run <任务描述>
@@ -353,25 +353,23 @@ bash <插件>/bin/mccl-setup-ssh
 
 ~原编排（已失效）~：依次调度 `mccl-developer`->`mccl-supervisor(stage=dev)`->`mccl-tester`->`mccl-supervisor(stage=test)`->`mccl-reporter`->`mccl-supervisor(stage=report)`。developer/supervisor 移除后此链条断裂，完整内容见 `commands/mccl-run.md`（已标注废弃）。
 
-### 只跑测试
+### 测试+报告
 
-库已编好、已分发好，只想复测：**`/mccl-test [<run目录>]`**。这是测试专用入口，不调开发、不改码/编译/分发。
+库已编好、已分发好，想复测并直接拿到验证报告：**`/mccl-test [<run目录>]`**。这是当前主入口，测完自动出报告，不调开发、不改码/编译/分发。
 
-- `<run目录>`：可指定已有 run 目录（`.`mccl-runs/<ts>` 根目录取其最新 `attempt-N/`，或直接给 `attempt-N/` 目录），不指定则新建 `.mccl-runs/<ts>/attempt-1/`。
-- 会做：按`$MCCL_NNODES`选场景，独立核对`libmccl.so`各节点md5（不采信开发自报值），跑对应`mpirun`，产出原始日志与`test-result.md`。
-- 不会做：改代码、改库、重新编译、分发、出报告、commit——`agents/mccl-tester.md`第5节硬约束第一条。
+- `<run目录>`：可指定已有 run 目录（`.mccl-runs/<ts>` 根目录取其最新 `attempt-N/`，或直接给 `attempt-N/` 目录），不指定则新建 `.mccl-runs/<ts>/attempt-1/`。
+- 会做：`git diff` 生成 `change.patch`（作报告变更基准；工作区无改动则为空，报告标注"纯回归"）；调 `mccl-tester` 按`$MCCL_NNODES`选场景、独立核对`libmccl.so`各节点md5、跑`mpirun`、产出原始日志与`test-result.md`；再调 `mccl-reporter` 读全部产物写 `report-1.md`，`cp` 成 `final-report.md`。测完无论 PASS/FAIL 都出报告。
+- 不会做：改代码、改库、重新编译、分发、commit。
+- 产物：`test-result.md`（测试结论）+ `final-report.md`（验证报告），主控会输出两者绝对路径并一句话转述结论。
 
-底层就是这个入口做的事：调 `mccl-tester` 子代理。**提示词里必须给绝对路径的run目录**——子代理继承的是主会话CWD，给相对路径它会写到别的地方去（`agents/mccl-tester.md`第1节"不要假设你的当前目录就是仓库根"）。手动调 `mccl-tester` 示例提示词：
+若只想测、不要报告，可跳过 `/mccl-test` 直接手动调 `mccl-tester`（提示词必须给绝对路径的 run 目录——子代理继承主会话CWD，给相对路径会写到别处去）。示例：
 
 ```
 用mccl-tester子代理跑一次测试。
 run目录：/home/xxx/mccl_dev_supernode/.mccl-runs/2026-07-17-1030/attempt-1
-读该目录下change.patch、dev-change.md、build.log（开发已产出）。
-产出写到同一目录：test-preflight.md、test-asymmetric.log、test-symmetric.log、
+产出写到该目录：test-preflight.md、test-asymmetric.log、test-symmetric.log、
 test-result.md（单节点模式对应改为test-singlenode.log）。
 ```
-
-这条路径只跑测试、不出报告；需要验证报告时另行调度 `mccl-reporter`。
 
 ### 只审计【已废弃】
 
