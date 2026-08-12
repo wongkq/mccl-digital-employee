@@ -92,7 +92,7 @@ $MCCL_MPIRUN --allow-run-as-root -np $MCCL_NP \
   -host $MCCL_HOST_SPEC \
   -x MCCL_PCIE_BUFFER_MODE=1 -x MCCL_ENABLE_FC=1 -x MCCL_P2P_LEVEL=PXB \
   -x LD_LIBRARY_PATH=$MCCL_LD_LIBRARY_PATH \
-  <二进制> -b 1k -e 1k -f 2 [-R 2]
+  <二进制> -b 32K -e 32M -f 2 -n 20000 -c 1 -w 200 -o sum -d float -G 100 [-R 2]
 ```
 
 - 场景A：`<二进制>` = `$MCCL_PERF_BIN_ASYM`，不加`-R 2`。
@@ -131,7 +131,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 ## 5. 硬约束（逐字，违反即ABORT或REWORK）
 
 - 不改代码、不改库、不重新编译。发现问题只能上报。
-- **mpirun hang超5分钟：禁止重启。** 采集`dmesg`和IB状态写入`test-anomaly.md`后上报。
+- **mpirun hang（判定见本节）：禁止重启。** 采集`dmesg`和IB状态写入`test-anomaly.md`后上报。
 - 不对远程环境做破坏性操作。
 - 日志必须是原始输出，不得摘要后落盘。
 
@@ -149,7 +149,12 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 
    写成 `ssh ... "<mpirun命令> > test-asymmetric.log 2>&1"` 就错了——日志留在NODE0上，
    而`mccl-reporter`没有Bash、取不了远程文件，对它而言等同于日志不存在。
-2. 从发起时刻起满5分钟，若进程仍未退出、且日志文件在最近一段时间内没有新增输出（判定为hang，而非仍在正常跑大消息量——多节点场景`-b 1k -e 1k -f 2`、单节点场景固定8MB消息量都不大，正常情况不该跑到5分钟），执行以下操作，且仅执行以下操作：
+2. 判定hang的准则按拓扑分两种（两者都要求"mpirun进程仍在运行"才适用；进程已退出=跑完了，按退出码判PASS/FAIL，不走hang路径）：
+
+   - **多节点模式（`$MCCL_NNODES=4/8`）——日志静默判定**：`all_reduce_perf`对每个消息尺寸输出一行摘要（`-b 32K -e 32M -f 2`共11个尺寸），正常运行时日志随每个尺寸完成逐行增长。若进程仍在运行、且日志文件**自上一行起已静默超过20分钟**（最近20分钟无新增输出），判定为hang。静默窗口设在单场景预期时长（约5-15分钟）之上：正常运行的相邻两行间隔顶多是最大尺寸（32M）那一轮的迭代时长，远小于20分钟；只有真正卡死才会静默20分钟。**前提**：此判定依赖`all_reduce_perf`逐尺寸增量刷新日志（而非把全部输出缓冲到退出才刷）；若实测发现日志直到进程退出才有输出，把静默窗口调大到超过整场景预期时长，或在mpirun命令前加`stdbuf -oL -eL`强制行缓冲。
+   - **单节点模式（`$MCCL_NNODES=1`）——墙钟判定**：单节点冒烟是固定8MB×10迭代的快速测试，预期秒级到1分钟内。若进程仍在运行、且自发起起已超过5分钟，判定为hang。
+
+   判定hang后，执行以下操作，且仅执行以下操作：
    - **不杀掉该mpirun进程**，不Ctrl-C，不重新发起一次，**不重启任何节点**。
    - 保持该hang的进程原样，另开一路（经`$MCCL_NODE0_IP`跳板）对相关节点采集`dmesg`（如`dmesg | tail -200`）和IB状态（如`ibstat`/`ibstatus`，视环境实际可用命令而定）。
    - 把采集到的原始输出（不摘要）连同"哪个场景、发起时间、判定hang的时间、当时的mpirun命令"写入`test-anomaly.md`。
@@ -158,7 +163,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 
 ## 6. 已知故障模式（来自`测试.md`的错误处理表）
 
-- **hang超5分钟**：查`dmesg`和IB状态（处置见第5节，禁止重启）。
+- **hang（判定见第5节）**：查`dmesg`和IB状态（处置见第5节，禁止重启）。
 - **SegFault**：查`MCCL_P2P_LEVEL`是否与固件匹配。
 - **性能回退**：对比Baseline排查编译器优化或环境变量变化。
 - **UDS Connection refused**：确认`$MCCL_MACA_PATH`的`mcMemFabricHandle_t`是1112字节版本（不是80字节的旧版stub）。
