@@ -101,23 +101,24 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc 'export MACA_PATH=$MCCL_MACA_PA
 
 ## 3. 编译节点与其余节点分发方式不同
 
-节点列表是`$MCCL_NODES`（空格分隔，第一个是编译节点，即`$MCCL_NODE0_IP`）。**所有节点宿主机的`/opt/maca/lib/`一律不更新**（`测试.md`明确禁止）。单节点验证用的是容器内那份同名目录；跨节点验证用的是`$MCCL_MACA_LIB_DIR`——两条路径互不相干，下面的表格就是按这条边界展开的。
+节点列表是`$MCCL_NODES`（空格分隔，第一个是编译节点，即`$MCCL_NODE0_IP`）。**所有节点宿主机的`/opt/maca/lib/`一律不更新**（`测试.md`明确禁止）。**（2026-08 更新：单节点冒烟测试场景已移除，动作①随之失去消费者——当前唯一的多节点测试只认`$MCCL_MACA_LIB_DIR`，即动作②。动作①的命令与说明保留作历史参考，新分发可只做②。）**跨节点验证用的是`$MCCL_MACA_LIB_DIR`——下面的表格按这条边界展开。
 
 `libmccl.so`编译出来停在`$MCCL_REMOTE_SRC/build/`里（编译流程只有`make -j50`，**没有`make install`**，产物不会自动进任何lib目录），必须靠下面的动作显式分发。
 
 | | 编译节点（`$MCCL_NODE0_IP`，`$MCCL_NODES`第一个） | 其余节点（`$MCCL_NODES`里除第一个之外的每一个） |
 |---|---|---|
 | 编译产物来源 | 本机容器内`build/`目录，容器路径与宿主机`$MCCL_REMOTE_SRC`是同一份（bind mount），产物直接可见 | 无，只能接收 |
-| 分发动作①<br>（给**单节点8卡**验证） | `ssh`进宿主机后`docker exec`进容器，容器内`cp`到容器内`$MCCL_VENDOR_MACA_PATH/lib/` | 不适用——单节点验证只在编译节点的容器内跑，其余节点不参与 |
+| 分发动作①<br>（历史：给**单节点8卡**验证，该场景已于 2026-08 移除，仅参考） | `ssh`进宿主机后`docker exec`进容器，容器内`cp`到容器内`$MCCL_VENDOR_MACA_PATH/lib/` | 不适用——单节点验证只在编译节点的容器内跑，其余节点不参与 |
 | 分发动作②<br>（给**跨节点多卡**验证，仅`$MCCL_NNODES`>1时需要） | 同样`docker exec`进容器内`cp`，但目标是`$MCCL_MACA_LIB_DIR`。该目录位于`$MCCL_REMOTE_WORKDIR`下，容器内与宿主机是**同一份**（bind mount），所以在容器内写进去，宿主机上的mpirun就能加载到——**不需要、也没有第二条把它送出容器的动作** | 从编译节点直接`scp`到目标节点的`$MCCL_MACA_LIB_DIR`（宿主机层，不经容器）。单节点时`$MCCL_NODES`里没有"其余节点"，这一列自然为空，不执行 |
 | 是否可编译/改源码 | 是，唯一编译节点 | 否，硬禁令（见`references/mccl-safety.md`第1条），只接受scp来的`libmccl.so` |
 
-**单节点（`$MCCL_NNODES=1`）时只需要动作①，不需要动作②**——单节点验证在容器内跑`--mca plm isolated`，不依赖`$MCCL_MACA_LIB_DIR`这条给宿主机跨节点mpirun用的路径。**多节点（`$MCCL_NNODES`>1）时动作①②都要做，缺一不可**：动作①的`$MCCL_VENDOR_MACA_PATH/lib/`只有容器内进程看得见；动作②的`$MCCL_MACA_LIB_DIR`才是跨节点mpirun（跑在**宿主机**上）通过`LD_LIBRARY_PATH`真正加载的那份。只做①不做②，编译节点在多卡测试里加载的仍是上一次的旧库或根本没有这个文件——而测试agent的preflight会对`$MCCL_NNODES`个节点的`$MCCL_MACA_LIB_DIR`逐个`md5sum`，编译节点这一处第一时间就对不上。
+**当前契约（单节点场景移除后）：多节点测试只需要动作②。** 动作②的`$MCCL_MACA_LIB_DIR`是跨节点mpirun（跑在**宿主机**上）通过`LD_LIBRARY_PATH`真正加载的那份。漏做动作②（尤其编译节点那一份），编译节点在多卡测试里加载的仍是上一次的旧库或根本没有这个文件——而测试agent的preflight会对`$MCCL_NNODES`个节点的`$MCCL_MACA_LIB_DIR`逐个`md5sum`，编译节点这一处第一时间就对不上。动作①只服务已移除的单节点冒烟（容器内`--mca plm isolated`跑的进程只看得见容器内`$MCCL_VENDOR_MACA_PATH/lib/`），保留在下文作历史参考。
 
 分发命令（引号层级见第1节，跳板规则见第5节）：
 
 ```bash
-# 动作①：单节点8卡验证用（容器内的厂商 MACA lib 目录，宿主机看不见）。始终做。
+# 动作①（历史保留，非当前测试前置）：单节点8卡验证用（容器内的厂商 MACA lib
+# 目录，宿主机看不见）。单节点冒烟场景已于 2026-08 移除，纯多节点测试可跳过此步。
 ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_VENDOR_MACA_PATH/lib/'"
 
 # 动作②：跨节点多卡验证用（bind mount 目录，宿主机 mpirun 加载的就是这份）。
@@ -139,8 +140,9 @@ done
 **无容器模式**（`$MCCL_CONTAINER`为空）——没有容器内外之分，编译产物`$MCCL_REMOTE_SRC/build/libmccl.so`就在宿主机文件系统里，动作①②合并成一条普通`cp`，不套`docker exec`：
 
 ```bash
-# 编译节点自己：直接 cp 到本机 MACA lib（不套 docker exec）。给单节点验证、
-# 也给跨节点mpirun用——无容器模式下$MCCL_VENDOR_MACA_PATH/lib与$MCCL_MACA_LIB_DIR
+# 编译节点自己：直接 cp 到本机 MACA lib（不套 docker exec）。给跨节点mpirun用
+# （历史上也服务单节点验证，该场景已于 2026-08 移除）——无容器模式下
+# $MCCL_VENDOR_MACA_PATH/lib与$MCCL_MACA_LIB_DIR
 # 不再是"容器内外两份"，视两者实际路径关系而定，通常直接cp到$MCCL_MACA_LIB_DIR即可。
 ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_MACA_LIB_DIR/"
 
@@ -155,11 +157,13 @@ done
 
 **编译节点的动作②是本工具包相对`测试.md`原始工作流的补充，不是抄来的。** `测试.md`的"分发`libmccl.so`到4节点"一节只有三条`scp`（发往其余三节点）加一条编译节点容器内到`/opt/maca/lib/`的`cp`，编译节点的`$MCCL_MACA_LIB_DIR`从头到尾没有被写过；同时全文只有`make -j50`、没有`make install`，产物也不会自流进去。也就是说，照`测试.md`的字面步骤执行，编译节点在多卡验证时加载的`libmccl.so`并非本次构建产物——这是原始工作流里一个真实存在的洞（原文当时能跑通，最可能是该文件由更早的某次操作留在了那里，`测试.md`未记载，本文档不替它补设定），不是本工具包新发明的要求。补上它是为了让"md5全一致"这条跨三方（开发第7节、dev卡点第11条、测试第4节）的契约在编译节点上真正可满足。
 
-## 4. 单节点 vs 跨节点验证：为什么命令形态不同
+## 4. 单节点 vs 跨节点验证：为什么命令形态不同（背景知识）
 
-- **单节点8卡**：在容器内跑，加`--mca plm isolated`，不依赖ssh。用于快速验证编译产物本身能跑通，不涉及跨节点通信路径。
+> 2026-08 注：单节点冒烟已从测试场景移除（`agents/mccl-tester.md` 第2节），本节保留作背景——它解释了为什么跨节点验证必须在宿主机跑，这条边界仍然有效。
+
+- **单节点8卡**（历史场景）：在容器内跑，加`--mca plm isolated`，不依赖ssh。用于快速验证编译产物本身能跑通，不涉及跨节点通信路径。
 - **跨节点多卡**：在宿主机跑，mpirun通过`-host`拉起`$MCCL_NODES`里全部节点的进程，依赖宿主机ssh互通。**容器内没有ssh，这一步不可能在容器内做。**
-- 如果目标宿主机GLIBC版本与编译环境不匹配（`测试.md`提到Node 0系统为特定GLIBC版本），跨节点验证会不可用，此时**退回容器内单节点验证**作为替代手段——这是唯一能确认编译产物本身正确性的兜底路径。
+- `测试.md`曾记载：目标宿主机GLIBC版本与编译环境不匹配时，退回容器内单节点验证作为替代手段。单节点场景移除后，工具包不再提供这条兜底——GLIBC不匹配时应如实上报，而不是退回一个测不到跨节点路径的场景。
 
 ## 5. SSH跳板拓扑
 
@@ -186,7 +190,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "scp <Node0上的路径> root@<目标节�
 | 必须在**容器内**做 | 必须在**宿主机**做 |
 |---|---|
 | 源码编译（`make`） | 跨节点分发（`scp`到其他节点） |
-| 单节点8卡验证（`--mca plm isolated`） | 跨节点32卡`mpirun`验证 |
+| 单节点8卡验证（`--mca plm isolated`，历史场景，2026-08 已移除） | 跨节点32卡`mpirun`验证 |
 | 容器内库路径的`cp`（第2节） | ssh跳转到其他节点 |
 
 任何需要"连到另一台机器"的动作，都不能写成"进容器后再ssh出去"——容器里没有这个可执行文件，命令会直接失败。凡涉及跨节点连通的步骤，必须先退出容器语境（即命令不套`docker exec`），在宿主机shell层执行。
@@ -221,4 +225,4 @@ rsync -avz $MCCL_LOCAL_SRC/<相对路径> \
 
 - **第3节的Node 0动作②（容器内`cp`到`$MCCL_MACA_LIB_DIR`）在`测试.md`里不存在**，是本文档补的（理由见第3节末尾）。它依据的两条事实都有原文出处——容器内`$MCCL_REMOTE_WORKDIR`与宿主机映射一致（bind mount）、跨节点mpirun的`LD_LIBRARY_PATH`指向`$MCCL_MACA_LIB_DIR`——但"因此Node 0要在容器内往这个目录`cp`一份"这个动作本身是推论，**（推断）**。原文缺这一步却能跑通的原因未记载，本文档不揣测。
 - 第1节的引号层级解释是从bash引用规则推导的，`测试.md`只给出了命令的成品形态，没有解释为什么这么写。推导本身可自行验证。
-- 第4节"GLIBC不匹配时退回单节点验证"中，"退回单节点验证"是`测试.md`明确给出的替代手段；但把它称为"唯一兜底路径"是本文档的判断，原文未如此表述。
+- 第4节"GLIBC不匹配时退回单节点验证"中，"退回单节点验证"是`测试.md`明确给出的替代手段；但把它称为"唯一兜底路径"是本文档的判断，原文未如此表述。**且单节点冒烟场景已于 2026-08 移除，该兜底当前不可用。**

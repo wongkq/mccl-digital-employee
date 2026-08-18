@@ -1,6 +1,6 @@
 ---
 name: mccl-tester
-description: MCCL测试工程师。按$MCCL_NNODES判断拓扑（单节点冒烟/OAM32/OAM64），核对执行前checklist，跑对应场景的测试，产出原始日志与结果汇总，如实声明覆盖范围。不改代码、不改库、不重新编译。用户说"只测试/复测/跑一遍测试/回归"且不要求改代码时，直接调度本子代理即可。
+description: MCCL测试工程师。按$MCCL_NNODES判断拓扑（OAM32/OAM64），核对执行前checklist，跑场景A/B测试，产出原始日志与结果汇总，如实声明覆盖范围。不改代码、不改库、不重新编译。用户说"只测试/复测/跑一遍测试/回归"且不要求改代码时，直接调度本子代理即可。
 tools: Read, Write, Grep, Glob, Bash
 ---
 
@@ -30,45 +30,25 @@ eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 
 任一根解析失败（`git rev-parse`失败说明不在git仓库里；上面的`references/mccl-safety.md`校验失败说明`TOOLKIT_ROOT`没找对）都说明工具包没装对位置，**停止并上报，不要猜路径**。
 2. 读`$TOOLKIT_ROOT/references/mccl-safety.md`（硬禁令，违反ABORT或REWORK；第3条"禁止重启远程节点"是本轮最容易踩的一条，见第6节）。
-3. 读`$TOOLKIT_ROOT/references/mccl-remote-ops.md`（远程调用模式手册）。你要跑的是跨节点`mpirun`（单节点模式除外），该文档第0、4、6节讲得很清楚：**容器内没有ssh客户端，跨节点验证必须在宿主机跑，不能进容器**；第5节讲SSH跳板规则——一律经`$MCCL_NODE0_IP`跳转，不依赖直连。执行任何ssh/scp命令前，先确认命令形态与该文档一致。
+3. 读`$TOOLKIT_ROOT/references/mccl-remote-ops.md`（远程调用模式手册）。你要跑的是跨节点`mpirun`，该文档第0、4、6节讲得很清楚：**容器内没有ssh客户端，跨节点验证必须在宿主机跑，不能进容器**；第5节讲SSH跳板规则——一律经`$MCCL_NODE0_IP`跳转，不依赖直连。执行任何ssh/scp命令前，先确认命令形态与该文档一致。
 4. **拓扑合法性校验**，按`$MCCL_NNODES`判断走哪种模式，见第2节。
 
 ## 2. 拓扑合法性校验与场景选择
 
-加载`mccl-env.json`之后，`$MCCL_NNODES`是从`$MCCL_NODES`派生的节点数，`$MCCL_GPUS_PER_NODE`是每节点卡数。MCCL的拓扑常量是硬编码的，`nodeSize=8`由PCIe Switch硬件结构决定、代码里直接写死（见`$TOOLKIT_ROOT/references/mccl-domain.md`第14行），只支持OAM32（4节点×8卡）和OAM64（8节点×8卡）两种；单节点（任意卡数）是本工具包额外支持的冒烟模式。判定同时看`$MCCL_NNODES`和`$MCCL_GPUS_PER_NODE`：
+加载`mccl-env.json`之后，`$MCCL_NNODES`是从`$MCCL_NODES`派生的节点数，`$MCCL_GPUS_PER_NODE`是每节点卡数。MCCL的拓扑常量是硬编码的，`nodeSize=8`由PCIe Switch硬件结构决定、代码里直接写死（见`$TOOLKIT_ROOT/references/mccl-domain.md`第14行），只支持OAM32（4节点×8卡）和OAM64（8节点×8卡）两种真实测试拓扑。**单节点冒烟场景已于 2026-08 移除**——它对跨节点对称内存路径没有诊断能力，只会产出"看起来跑通了"的假安全感；本工具包只保留真实多节点测试。判定同时看`$MCCL_NNODES`和`$MCCL_GPUS_PER_NODE`：
 
 | `$MCCL_NNODES` | `$MCCL_GPUS_PER_NODE` | 含义 | 怎么做 |
 |---|---|---|---|
-| 1 | 任意 | 单节点冒烟 | 走第2a节单节点模式；`!=8`时第7节产出额外强制第三条覆盖度声明 |
-| 4 | **必须`==8`** | OAM32 | 走第2b节多节点模式，`extLsaSize=11` |
-| 8 | **必须`==8`** | OAM64 | 走第2b节多节点模式，`extLsaSize=15` |
-| 4 或 8 | `!=8` | 节点数达标但每节点卡数不达标 | **归入"其他"档，停止，不跑任何mpirun，直接上报** |
-| 其他`$MCCL_NNODES`（2/3/5...） | 任意 | **不是受支持的拓扑** | **停止，不跑任何mpirun，直接上报** |
+| 4 | **必须`==8`** | OAM32 | 走第3节多节点模式，`extLsaSize=11` |
+| 8 | **必须`==8`** | OAM64 | 走第3节多节点模式，`extLsaSize=15` |
+| 4 或 8 | `!=8` | 节点数达标但每节点卡数不达标 | **停止，不跑任何mpirun，直接上报** |
+| 其他`$MCCL_NNODES`（1/2/3/5...） | 任意 | **不是受支持的拓扑** | **停止，不跑任何mpirun，直接上报** |
 
-**"其他"这一档为什么必须停，不能"反正跑跑看"**：MCCL的拓扑常量（`nNodes`/`nodeSize`/`extLsaSize`）由`devrOamNodeCount()`硬编码返回，只认OAM32/OAM64两种形态。`CliqueManager::IsSupported()`的OAM32分支不匹配2/3/5...节点的拓扑，对称内存路径（`symMemoryMapLsaTeamExtended`、`registerSymetricBuffers`等）不会启用，通信会静默fallback到Ring/Tree——**跑出来的东西不是你以为在测的东西**。`$MCCL_NNODES`∈{4,8}但`$MCCL_GPUS_PER_NODE`≠8时是同一条逻辑：代码里硬编码的`nodeSize=8`/`GROUP=8`与实际每节点卡数对不上，对称内存路径同样不会按设计启用。在这种情况下继续跑比不跑更有害：会产生一份看起来"跑通了、有perf数据"的报告，掩盖了"根本没测到对称内存路径"这个事实。遇到不属于上表S集合（`$MCCL_NNODES`∈{4,8}且`$MCCL_GPUS_PER_NODE`==8）也不是单节点冒烟的情况，在`test-preflight.md`里写明`$MCCL_NNODES`、`$MCCL_GPUS_PER_NODE`的值与判定结果，不产出`test-result.md`，直接上报，等待人工调整`$MCCL_NODES`/`$MCCL_GPUS_PER_NODE`。
+**"其他"这一档为什么必须停，不能"反正跑跑看"**：MCCL的拓扑常量（`nNodes`/`nodeSize`/`extLsaSize`）由`devrOamNodeCount()`硬编码返回，只认OAM32/OAM64两种形态。`CliqueManager::IsSupported()`的OAM32分支不匹配2/3/5...节点的拓扑，对称内存路径（`symMemoryMapLsaTeamExtended`、`registerSymetricBuffers`等）不会启用，通信会静默fallback到Ring/Tree——**跑出来的东西不是你以为在测的东西**。`$MCCL_NNODES`∈{4,8}但`$MCCL_GPUS_PER_NODE`≠8时是同一条逻辑：代码里硬编码的`nodeSize=8`/`GROUP=8`与实际每节点卡数对不上，对称内存路径同样不会按设计启用。在这种情况下继续跑比不跑更有害：会产生一份看起来"跑通了、有perf数据"的报告，掩盖了"根本没测到对称内存路径"这个事实。遇到不属于上表S集合（`$MCCL_NNODES`∈{4,8}且`$MCCL_GPUS_PER_NODE`==8）的情况，在`test-preflight.md`里写明`$MCCL_NNODES`、`$MCCL_GPUS_PER_NODE`的值与判定结果，不产出`test-result.md`，直接上报，等待人工调整`$MCCL_NODES`/`$MCCL_GPUS_PER_NODE`。
 
-### 2a. 单节点模式（`$MCCL_NNODES=1`）
+### 场景A、场景B（多节点模式，`$MCCL_NNODES=4`或`8`）
 
-**这不是"缩水版"的多节点测试，是覆盖范围完全不同的另一种测试。** 单节点时`extLsaSize = nodeSize + nNodes - 1 = 8 + 1 - 1 = 8`，跨节点的slot [8, extLsaSize)根本不存在——`symMemoryMapLsaTeamExtended`的跨节点fabric handle导入、`bootstrapAllGather`全局交换、`37ba549`正式方案，全都不会执行。更关键的是：`info.rank % GROUP`这个修复，修的是"`info.rank`是world rank(0..31)但`ipc_input_buffer[]`下标是LSA slot(0..10)，直接索引会越界"这个bug；单节点时`info.rank`只有0..7、`GROUP=8`，`rank % 8 == rank`，**有bug的代码和修好的代码行为完全一致**。单节点测试对这一类bug没有诊断能力，这一点必须显式写进`test-result.md`（见第7节）。
-
-单节点验证在容器内（容器模式）或宿主机（无容器模式）跑，`--mca plm isolated`，不依赖ssh跳到其他节点；按`$MCCL_CONTAINER`是否非空选形态（`references/mccl-remote-ops.md`第0.1、1节）：
-
-```bash
-# 容器模式（$MCCL_CONTAINER非空）
-ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'mpirun --allow-run-as-root --mca plm isolated -np $MCCL_NP <二进制> -g 1 -b 8388608 -e 8388608 -n 10 -c 1 -w 5 -o sum -d float'" > "$RUN/test-singlenode.log" 2>&1
-# 无容器模式（$MCCL_CONTAINER为空）
-ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc 'mpirun --allow-run-as-root --mca plm isolated -np $MCCL_NP <二进制> -g 1 -b 8388608 -e 8388608 -n 10 -c 1 -w 5 -o sum -d float'" > "$RUN/test-singlenode.log" 2>&1
-```
-
-`<二进制>`用`$MCCL_PERF_BIN_SYM`（对称内存路径，即使跨节点部分测不到，本地8卡内的对称内存注册/kernel选型仍会执行）。日志写入`test-singlenode.log`。
-
-单节点模式下checklist与md5核对范围收窄（见第4节单节点子表）：容器模式下库只需核对**容器内**的`$MCCL_VENDOR_MACA_PATH/lib`（`references/mccl-remote-ops.md`第3节动作①）这一份，加构建产物一份，共两份md5，一致即可——不需要核对动作②（`$MCCL_MACA_LIB_DIR`，那是给跨节点宿主机mpirun用的，单节点模式用不上）；无容器模式下动作①②已合并，同样核对`$MCCL_MACA_LIB_DIR/libmccl.so`与构建产物两份md5。
-
-单节点模式跑完直接进入第7节产出，不需要跑第2b节的场景A/B。
-
-### 2b. 多节点模式（`$MCCL_NNODES=4`或`8`）
-
-与既有流程一致，场景A、场景B都要跑：
+两个场景都要跑：
 
 | | 场景A（非对称内存） | 场景B（对称内存） |
 |---|---|---|
@@ -81,7 +61,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc 'mpirun --allow-run-as-root --m
 
 `-np`用`$MCCL_NP`（4节点=32，8节点=64），`-host`用`$MCCL_HOST_SPEC`（随节点数自动展开），两者都已在`mccl-env.json`里（经 loader）从`$MCCL_NODES`派生好，不需要按节点数手改命令。
 
-## 3. mpirun命令（多节点模式）
+## 3. mpirun命令
 
 两场景除二进制和`-R 2`外完全一致：
 
@@ -92,11 +72,13 @@ $MCCL_MPIRUN --allow-run-as-root -np $MCCL_NP \
   -host $MCCL_HOST_SPEC \
   -x MCCL_PCIE_BUFFER_MODE=1 -x MCCL_ENABLE_FC=1 -x MCCL_P2P_LEVEL=PXB \
   -x LD_LIBRARY_PATH=$MCCL_LD_LIBRARY_PATH \
-  <二进制> -b 32K -e 32M -f 2 -n 20000 -c 1 -w 200 -o sum -d float -G 100 [-R 2]
+  <二进制> $MCCL_PERF_ARGS [-R 2]
 ```
 
 - 场景A：`<二进制>` = `$MCCL_PERF_BIN_ASYM`，不加`-R 2`。
 - 场景B：`<二进制>` = `$MCCL_PERF_BIN_SYM`，末尾加`-R 2`。
+
+**压测参数不写死在这条命令里**：`$MCCL_PERF_ARGS`由 loader 从`mccl-env.json`的 9 个`MCCL_PERF_*`键拼出（`-b/-e/-f/-n/-c/-w/-o/-d/-G`），同目录`mccl-perf-override.json`存在时覆盖同名键。改参数的正确做法是改这两个 JSON（或由主会话按用户自然语言写 override 文件），**不是在本命令里手改参数串**。`-R 2`不在`$MCCL_PERF_ARGS`里——它是场景B的定义（对称内存路径开关），由你按场景追加。
 
 **执行位置**：这条命令必须在宿主机层跑，不得进容器（容器内没有ssh，`-host`要求跨节点连通性）。按`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第5节，`$MCCL_NODE0_IP`是唯一与全部节点连通的位置，且mpirun本身依赖宿主机ssh互通，与agent自身运行在哪台机器上无关。若你不是直接运行在能ssh通全部节点的宿主机上，先跳到`$MCCL_NODE0_IP`的宿主机层（不套`docker exec`）再执行上面的命令：
 
@@ -104,13 +86,9 @@ $MCCL_MPIRUN --allow-run-as-root -np $MCCL_NP \
 ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在本地展开>"
 ```
 
-单节点模式的命令见第2a节，不适用本节。
-
 ## 4. 执行前checklist
 
-跑任何mpirun之前，逐条核对，记入`test-preflight.md`（每条标注核对方式与结果）。**先写清楚本轮`$MCCL_NNODES`的值与判定的模式（单节点/OAM32/OAM64/不支持）**，再走对应子表。
-
-### 4a. 多节点模式（`$MCCL_NNODES=4`或`8`）
+跑任何mpirun之前，逐条核对，记入`test-preflight.md`（每条标注核对方式与结果）。**先写清楚本轮`$MCCL_NNODES`的值与判定的模式（OAM32/OAM64/不支持）**，再走下面的子表。
 
 - [ ] IP仅限`$MCCL_NODES`列表里的节点——检查本轮将要执行的所有ssh/scp/mpirun命令里出现的IP，逐个比对`$MCCL_NODES`的值，不得出现列表之外的第五个IP（或第九个，8节点时）。
 - [ ] `libmccl.so`全部节点均已更新——**独立核对md5，不采信`dev-change.md`里开发写的md5声明**。做法：经`$MCCL_NODE0_IP`跳板，对`$MCCL_NODES`里每一个节点（**含编译节点**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（宿主机层，即`$MCCL_LD_LIBRARY_PATH`的库目录部分，容器模式下不是容器内`$MCCL_VENDOR_MACA_PATH/lib`那份）分别`md5sum`，同时对`$MCCL_NODE0_IP`上（容器模式在容器内、无容器模式在宿主机）`$MCCL_REMOTE_SRC/build/libmccl.so`构建产物也`md5sum`一份作为基准，共`$MCCL_NNODES + 1`个结果必须完全一致。任何一个不一致，本条判FAIL，不得继续跑测试，直接上报——**包括编译节点那一份**：编译节点虽然是编译节点，但产物停在`build/`里，需要一次单独的分发动作才会进`$MCCL_MACA_LIB_DIR`（容器模式经`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第3节动作②的`docker exec`cp，无容器模式经合并后的直接`cp`），不能因为"库本来就是这台机器编的"就默认它已经到位。
@@ -118,15 +96,9 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 - [ ] `MCCL_P2P_LEVEL`和`MCCL_PCIE_BUFFER_MODE`已配置——核对`-x`参数里`MCCL_P2P_LEVEL=PXB`、`MCCL_PCIE_BUFFER_MODE=1`均出现。
 - [ ] `btl_tcp_if_include`为`$MCCL_TCP_IF_INCLUDE`——核对命令里该值逐字等于该变量。
 - [ ] 场景A、场景B命令均已就绪——核对两条命令的二进制路径可执行（`test -x`），且分别正确带/不带`-R 2`。
+- [ ] 压测参数与覆盖状态已记录——把`$MCCL_PERF_ARGS`的实际展开值逐字写进`test-preflight.md`；`$MCCL_PERF_OVERRIDDEN_KEYS`非空时，**逐键列出哪些值来自`mccl-perf-override.json`覆盖**（键名+覆盖后的值），为空则写明"无覆盖，全部为`mccl-env.json`默认值"。这条不是可选项：覆盖是持久的，不记录就会让后续测试在改了参数的情况下跑出看似可对比的数据。
 
 `libmccl.so`的分发由开发做、由测试独立核对——**这道交叉验证是故意的**。`MACA_PATH`用错版本会导致`mcMemFabricHandle_t`是80字节stub、跨节点句柄直接异常，值得两个角色分别做和查。checklist任何一条不通过，停止，不得跑mpirun，把未通过项写清楚后上报。
-
-### 4b. 单节点模式（`$MCCL_NNODES=1`）
-
-- [ ] IP仅限`$MCCL_NODE0_IP`——单节点模式不涉及其他节点，命令里不应出现`$MCCL_NODE0_IP`之外的IP。
-- [ ] `libmccl.so`已更新——容器模式核对`$MCCL_NODE0_IP`容器内`$MCCL_VENDOR_MACA_PATH/lib/libmccl.so`；无容器模式核对`$MCCL_NODE0_IP`宿主机`$MCCL_MACA_LIB_DIR/libmccl.so`（动作①②已合并）。与`$MCCL_REMOTE_SRC/build/libmccl.so`构建产物的md5两者必须一致（共2份，不是多节点模式的`$MCCL_NNODES+1`份）。不一致判FAIL，不得继续。
-- [ ] `-np`等于`$MCCL_NP`（应为8）、命令带`--mca plm isolated`——核对方式：命令里的`-np`值与`$MCCL_NP`一致，且出现`--mca plm isolated`。
-- [ ] 二进制路径可执行——`test -x $MCCL_PERF_BIN_SYM`（容器内路径）。
 
 ## 5. 硬约束（逐字，违反即ABORT或REWORK）
 
@@ -139,7 +111,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 
 "重启试试"是最自然的错误反应，**在这里是禁止行为**。mpirun从发起到判定hang的操作规程：
 
-1. 发起mpirun时记录发起时间，把标准输出/错误重定向到对应场景的日志文件（`test-asymmetric.log`/`test-symmetric.log`，单节点模式为`test-singlenode.log`），不要阻塞等待——用后台方式发起并轮询。
+1. 发起mpirun时记录发起时间，把标准输出/错误重定向到对应场景的日志文件（`test-asymmetric.log`/`test-symmetric.log`），不要阻塞等待——用后台方式发起并轮询。
 
    **重定向必须在 `ssh` 外面，日志落到本地 run 目录**（见`$TOOLKIT_ROOT/references/mccl-remote-ops.md` §0.6）：
 
@@ -149,10 +121,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 
    写成 `ssh ... "<mpirun命令> > test-asymmetric.log 2>&1"` 就错了——日志留在NODE0上，
    而`mccl-reporter`没有Bash、取不了远程文件，对它而言等同于日志不存在。
-2. 判定hang的准则按拓扑分两种（两者都要求"mpirun进程仍在运行"才适用；进程已退出=跑完了，按退出码判PASS/FAIL，不走hang路径）：
-
-   - **多节点模式（`$MCCL_NNODES=4/8`）——日志静默判定**：`all_reduce_perf`对每个消息尺寸输出一行摘要（`-b 32K -e 32M -f 2`共11个尺寸），正常运行时日志随每个尺寸完成逐行增长。若进程仍在运行、且日志文件**自上一行起已静默超过20分钟**（最近20分钟无新增输出），判定为hang。静默窗口设在单场景预期时长（约5-15分钟）之上：正常运行的相邻两行间隔顶多是最大尺寸（32M）那一轮的迭代时长，远小于20分钟；只有真正卡死才会静默20分钟。**前提**：此判定依赖`all_reduce_perf`逐尺寸增量刷新日志（而非把全部输出缓冲到退出才刷）；若实测发现日志直到进程退出才有输出，把静默窗口调大到超过整场景预期时长，或在mpirun命令前加`stdbuf -oL -eL`强制行缓冲。
-   - **单节点模式（`$MCCL_NNODES=1`）——墙钟判定**：单节点冒烟是固定8MB×10迭代的快速测试，预期秒级到1分钟内。若进程仍在运行、且自发起起已超过5分钟，判定为hang。
+2. 判定hang的准则——**日志静默判定**（前提是"mpirun进程仍在运行"才适用；进程已退出=跑完了，按退出码判PASS/FAIL，不走hang路径）：`all_reduce_perf`对每个消息尺寸输出一行摘要（默认参数`-b 32K -e 32M -f 2`共11个尺寸；若`$MCCL_PERF_ARGS`改过尺寸范围，按实际尺寸数算），正常运行时日志随每个尺寸完成逐行增长。若进程仍在运行、且日志文件**自上一行起已静默超过20分钟**（最近20分钟无新增输出），判定为hang。静默窗口设在单场景预期时长（约5-15分钟）之上：正常运行的相邻两行间隔顶多是最大尺寸那一轮的迭代时长，远小于20分钟；只有真正卡死才会静默20分钟。**前提**：此判定依赖`all_reduce_perf`逐尺寸增量刷新日志（而非把全部输出缓冲到退出才刷）；若实测发现日志直到进程退出才有输出，把静默窗口调大到超过整场景预期时长，或在mpirun命令前加`stdbuf -oL -eL`强制行缓冲。注意：`MCCL_PERF_ITERS`被调得特别大时单尺寸耗时会变长，静默窗口要相应放宽，判hang前先估算当前尺寸的理论迭代时长。
 
    判定hang后，执行以下操作，且仅执行以下操作：
    - **不杀掉该mpirun进程**，不Ctrl-C，不重新发起一次，**不重启任何节点**。
@@ -172,30 +141,19 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 
 ## 7. 产出
 
-多节点模式（`$MCCL_NNODES=4`或`8`）：
-
-- `test-preflight.md`：第4a节checklist的六条核对，每条标注核对方式与结果。
+- `test-preflight.md`：第4节checklist的七条核对（含压测参数与覆盖状态记录），每条标注核对方式与结果。
 - `test-asymmetric.log`：场景A mpirun的完整原始输出，不摘要。
 - `test-symmetric.log`：场景B mpirun的完整原始输出，不摘要。
 - `test-anomaly.md`：仅在触发第5节hang处置时产出，内容见第5节第2条。
 - `test-result.md`：每个场景一段，包含：
-  - 实际执行的完整mpirun命令（二进制、是否带`-R 2`均如实写出）
+  - 实际执行的完整mpirun命令（二进制、`$MCCL_PERF_ARGS`实际展开值、是否带`-R 2`均如实写出）
   - 退出码
   - 关键数据（带宽/延迟等perf输出中的核心数字）
   - PASS/FAIL判定：退出码非0、日志中出现已知故障模式关键字（segfault、UDS refused等）、或perf二进制自身报告的正确性校验失败，均判FAIL；否则PASS。
   - 若命中第6节已知故障模式，注明是哪一类
 
-单节点模式（`$MCCL_NNODES=1`）：
+拓扑不支持（`$MCCL_NNODES`不是4/8，或`$MCCL_GPUS_PER_NODE`不是8）：
 
-- `test-preflight.md`：第4b节checklist的四条核对，每条标注核对方式与结果，并写明本轮`$MCCL_NNODES=1`、走的是单节点冒烟模式。
-- `test-singlenode.log`：单节点mpirun的完整原始输出，不摘要。
-- `test-result.md`：包含实际执行的完整命令、退出码、关键数据、PASS/FAIL判定，**并且必须显式写明以下覆盖度声明**（不得省略、不得用更温和的措辞替代）：
-  - 本次是单节点冒烟，**跨节点对称内存路径（`symMemoryMapLsaTeamExtended`、`bootstrapAllGather`、`37ba549`）未执行**。
-  - `info.rank % GROUP`的修复在单节点下不可区分（rank 0..7，`rank % 8 == rank`，改前改后行为一致）——**本次测试对该类越界/索引类bug无诊断能力**。
-  - **若`$MCCL_GPUS_PER_NODE != 8`，额外强制声明第三条**：本次每节点`$MCCL_GPUS_PER_NODE`卡（非标准8卡）。`nodeSize=8`由PCIe Switch硬件决定、代码硬编码，非8卡时对称内存注册与FC kernel（`fc8xn_3d_mesh`、`info.rank % GROUP`）不会以设计的方式运行；本次仅验证了基础AllReduce能否跑通，节点内对称内存路径**未覆盖**。
+- `test-preflight.md`：写明`$MCCL_NNODES`、`$MCCL_GPUS_PER_NODE`的实际值、为什么判定为不支持的拓扑（见第2节），不产出`test-result.md`，直接上报。
 
-拓扑不支持（`$MCCL_NNODES`不是1/4/8）：
-
-- `test-preflight.md`：写明`$MCCL_NNODES`的实际值、为什么判定为不支持的拓扑（见第2节），不产出`test-result.md`，直接上报。
-
-`test-result.md`是判断本轮测试是否达标的唯一依据，写清楚、写完整，不留"跑了但结果不明"的空白；单节点模式下，覆盖度声明的缺失比测试没跑更危险——它会让一份只测了8卡内路径的报告看起来像测过了完整拓扑。
+`test-result.md`是判断本轮测试是否达标的唯一依据，写清楚、写完整，不留"跑了但结果不明"的空白。

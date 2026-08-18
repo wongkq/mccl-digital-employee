@@ -56,7 +56,7 @@ fi
 - **带宽**：cached、fail/error/warn 计数、health_report 路径（evidence）
 - **bin 就绪**：sym/asym/mpirun 各 ✅/❌
 - **failures**：逐条列出（带宽告警也列，标注"仍 READY"）
-- **覆盖度声明**：若 verdict=READY 但带宽有 WARN，显式写"带宽告警未阻断，供人工收紧"；若拓扑是单节点，写"单节点冒烟，跨节点对称内存路径未覆盖"（与 mccl-tester 单节点声明一致）
+- **覆盖度声明**：若 verdict=READY 但带宽有 WARN，显式写"带宽告警未阻断，供人工收紧"；若拓扑不是 (8卡,4节点)/(8卡,8节点)，写"非受支持拓扑，mccl-tester 将拒绝跑测试"（单节点冒烟场景已于 2026-08 移除）
 
 ## 5. 硬约束（逐字，违反即 ABORT）
 

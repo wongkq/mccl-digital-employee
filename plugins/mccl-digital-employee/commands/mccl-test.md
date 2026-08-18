@@ -1,6 +1,6 @@
 ---
 name: mccl-test
-description: 测试+报告一条龙：调 mccl-tester 按拓扑（单节点冒烟/OAM32/OAM64）跑测试，再调 mccl-reporter 写验证报告。独立核对 libmccl.so 各节点 md5。不改代码、不重新编译、不分发库。适用"库已编译分发好、想测试+出报告"的场景。自然语言触发：测试/复测/跑一遍测试/回归验证（未要求改代码时）。
+description: 测试+报告一条龙：调 mccl-tester 按拓扑（OAM32/OAM64）跑场景A/B测试，再调 mccl-reporter 写验证报告。支持自然语言临时覆盖压测参数（写入 mccl-perf-override.json）。独立核对 libmccl.so 各节点 md5。不改代码、不重新编译、不分发库。适用"库已编译分发好、想测试+出报告"的场景。自然语言触发：测试/复测/跑一遍测试/回归验证（未要求改代码时）。
 ---
 
 你是 MCCL **测试+报告**主控（`/mccl-test`）。用户输入：`/mccl-test [<run目录>]`。
@@ -28,6 +28,16 @@ eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 
 `git rev-parse` 失败就停止并提示"请在MCCL仓库内运行"；`mccl-env.json` 不存在或缺必需键（loader 报错）就停止，提示用户先 `cp <插件>/mccl-env.json.example ./mccl-env.json` 并填值。不得跳过。
 
+## 1.5 压测参数覆盖（自然语言改参）
+
+用户可能在本次请求里用自然语言改了压测参数（如"起始尺寸改成 16K"、"迭代次数 5000"、"数据类型用 half"）。这类改动**不改 `mccl-env.json`**（那是默认值），而是落到覆盖文件 `$REPO_ROOT/mccl-perf-override.json`（不入库）：
+
+- **识别映射**：起始尺寸→`MCCL_PERF_BEGIN`，结束尺寸→`MCCL_PERF_END`，倍乘因子→`MCCL_PERF_FACTOR`，迭代次数→`MCCL_PERF_ITERS`，预热次数→`MCCL_PERF_WARMUP`，校验开关→`MCCL_PERF_CHECK`，归约操作→`MCCL_PERF_OP`，数据类型→`MCCL_PERF_DTYPE`，GPU校验迭代数→`MCCL_PERF_GPU_CHECK_ITERS`。映射不上的参数名，向用户澄清，不要猜。
+- **写入**：文件已存在则读出、合并新键、写回（保留已有覆盖）；不存在则新建。只放 `MCCL_PERF_*` 键。
+- **清除**：用户说"清除压测参数覆盖/恢复默认参数"→ 删除该文件。
+- 写完后重新 `eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"`，把即将生效的 `$MCCL_PERF_ARGS` 和覆盖键列表（`$MCCL_PERF_OVERRIDDEN_KEYS`）展示给用户确认一眼，再继续往下走。
+- 覆盖是**持久的**（跨轮保留，直到用户说清除）——这是有意设计；可见性由 tester 的 preflight 记录（`agents/mccl-tester.md` 第4节）和你收尾时的提示（第6节）保证。
+
 ## 2. run 目录决定
 
 - **给定了 `<run目录>`（绝对路径）**：若是 `.mccl-runs/<ts>` 根目录（含 `attempt-*` 子目录），取最新 `attempt-N/` 作为本轮产物目录；若本身就是 `attempt-N/` 目录，直接使用。传给子代理的必须是这个绝对路径。
@@ -46,7 +56,7 @@ git diff > "$RUN_DIR/change.patch"
 ## 4. 调度 mccl-tester（测试）
 
 `Task(mccl-tester)`：
-- prompt 里写清 run 目录绝对路径、产物写该目录：`test-preflight.md`、`test-asymmetric.log`、`test-symmetric.log`（单节点模式为 `test-singlenode.log`）、`test-result.md`、异常时 `[test-anomaly.md]`。
+- prompt 里写清 run 目录绝对路径、产物写该目录：`test-preflight.md`、`test-asymmetric.log`、`test-symmetric.log`、`test-result.md`、异常时 `[test-anomaly.md]`。
 - 目录里已有的 `change.patch` / `dev-change.md` / `build.log` 若存在就传给 tester 作参考；不存在就明确告诉它"无上一轮开发产物，md5 基准以构建产物 `$MCCL_REMOTE_SRC/build/libmccl.so` 为准，自行计算"。
 - `mccl-tester` 会独立核对各节点 `libmccl.so` md5（不采信任何自报值）、按 `$MCCL_NNODES` 选拓扑场景、跑 mpirun、落原始日志（`agents/mccl-tester.md`）。
 
@@ -56,7 +66,7 @@ git diff > "$RUN_DIR/change.patch"
 
 `Task(mccl-reporter)`：
 - prompt 里写清：
-  - 读 `$RUN_DIR/` 下的 `change.patch`、`test-preflight.md`、`test-asymmetric.log`/`test-symmetric.log`（或 `test-singlenode.log`）、`test-result.md`、`[test-anomaly.md]`；`dev-change.md`/`build.log` 若存在也读。
+  - 读 `$RUN_DIR/` 下的 `change.patch`、`test-preflight.md`、`test-asymmetric.log`/`test-symmetric.log`、`test-result.md`、`[test-anomaly.md]`；`dev-change.md`/`build.log` 若存在也读。
   - 写 `$RUN_DIR/report-1.md`（给完整文件名，别只给目录）。
 - `mccl-reporter` 无 Bash，只读产物转述，每个数字必有出处，未覆盖场景标"未覆盖"不推断（`agents/mccl-reporter.md`）。结论必须与 `test-result.md` 一致：测试 FAIL 就不能写"可以 commit"。
 
@@ -67,7 +77,7 @@ cp "$RUN_DIR/report-1.md" "$RUN_DIR/final-report.md"
 
 ## 6. 收尾
 
-向用户输出 `test-result.md` 与 `final-report.md` 的**绝对路径**，并一句话转述报告结论（PASS/FAIL + 关键原因）。提示用户：本命令只测试+出报告，不 commit；是否 commit 由人工确认后自行执行。
+向用户输出 `test-result.md` 与 `final-report.md` 的**绝对路径**，并一句话转述报告结论（PASS/FAIL + 关键原因）。若 `mccl-perf-override.json` 存在（本轮有活跃覆盖），额外打印一行覆盖清单（如"本轮使用了参数覆盖：MCCL_PERF_BEGIN=16K；说'清除覆盖'可恢复默认"）。提示用户：本命令只测试+出报告，不 commit；是否 commit 由人工确认后自行执行。
 
 ## 7. 不做的事
 

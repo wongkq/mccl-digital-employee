@@ -20,3 +20,6 @@ gpu_health_results_*/
 # 本地 timing hook 日志（开发用时间线账本，不入库）
 .mccl-timing.log
 
+
+# 压测参数临时覆盖（自然语言改参的落点，本地状态不入库）
+mccl-perf-override.json

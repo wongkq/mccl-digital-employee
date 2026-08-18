@@ -92,7 +92,7 @@ loader="$PLUGIN_ROOT/bin/mccl-env-load.py"
 if [ ! -f "$example_json" ] || [ ! -f "$loader" ]; then
   err "缺 $example_json 或 $loader，无法校验引用闭合"
 else
-  # loader --keys 对 example 跑一次，拿到全部变量名（raw 14 + derived 7）
+  # loader --keys 对 example 跑一次，拿到全部变量名（raw 23 + derived 9）
   all_keys="$(python3 "$loader" "$example_json" --keys 2>/dev/null | sort -u)"
   undef=""
   for v in $(grep -rhoE '\$\{?MCCL_[A-Z0-9_]+' "$PLUGIN_ROOT/agents/" "$PLUGIN_ROOT/commands/" "$PLUGIN_ROOT/references/" "$PLUGIN_ROOT/bin/" 2>/dev/null \
@@ -188,6 +188,49 @@ PY
     err "loader 节点派生量有问题：$derive_bad"
   else
     ok "loader 节点派生量（NODE0_IP/NNODES/NP/HOST_SPEC）随输入变化、非写死"
+  fi
+fi
+
+# --- 12b. 压测参数派生与 override 合并（MCCL_PERF_ARGS / mccl-perf-override.json）---
+# 验证三点：默认拼串正确；override 覆盖生效且 MCCL_PERF_OVERRIDDEN_KEYS 记录键名；
+# override 含非 MCCL_PERF_* 键时报错退出（防写错键名静默不生效）。
+if [ -f "$loader" ] && [ -f "$example_json" ]; then
+  odir="$(mktemp -d)"
+  cp "$example_json" "$odir/mccl-env.json"
+  perf_bad=""
+  # 默认值（example 里的 32K/32M/2/20000/1/200/sum/float/100）
+  eval "$(python3 "$loader" "$odir/mccl-env.json" 2>/dev/null)"
+  [ "${MCCL_PERF_ARGS:-}" = "-b 32K -e 32M -f 2 -n 20000 -c 1 -w 200 -o sum -d float -G 100" ] \
+    || perf_bad="$perf_bad 默认MCCL_PERF_ARGS错(${MCCL_PERF_ARGS:-?})"
+  [ -z "${MCCL_PERF_OVERRIDDEN_KEYS:-}" ] \
+    || perf_bad="$perf_bad 无override时OVERRIDDEN_KEYS应为空(${MCCL_PERF_OVERRIDDEN_KEYS:-?})"
+  # override 生效
+  echo '{"MCCL_PERF_BEGIN": "16K", "MCCL_PERF_ITERS": 5000}' > "$odir/mccl-perf-override.json"
+  eval "$(python3 "$loader" "$odir/mccl-env.json" 2>/dev/null)"
+  [ "${MCCL_PERF_ARGS:-}" = "-b 16K -e 32M -f 2 -n 5000 -c 1 -w 200 -o sum -d float -G 100" ] \
+    || perf_bad="$perf_bad override后MCCL_PERF_ARGS错(${MCCL_PERF_ARGS:-?})"
+  [ "${MCCL_PERF_OVERRIDDEN_KEYS:-}" = "MCCL_PERF_BEGIN MCCL_PERF_ITERS" ] \
+    || perf_bad="$perf_bad OVERRIDDEN_KEYS错(${MCCL_PERF_OVERRIDDEN_KEYS:-?})"
+  # 非 MCCL_PERF_* 键必须报错
+  echo '{"MCCL_NODES": "1.2.3.4"}' > "$odir/mccl-perf-override.json"
+  if python3 "$loader" "$odir/mccl-env.json" >/dev/null 2>&1; then
+    perf_bad="$perf_bad 非perf键的override未报错"
+  fi
+  # 未知 perf 键必须报错
+  echo '{"MCCL_PERF_XXX": "1"}' > "$odir/mccl-perf-override.json"
+  if python3 "$loader" "$odir/mccl-env.json" >/dev/null 2>&1; then
+    perf_bad="$perf_bad 未知perf键的override未报错"
+  fi
+  # 非整数 ITERS 必须报错
+  echo '{"MCCL_PERF_ITERS": "abc"}' > "$odir/mccl-perf-override.json"
+  if python3 "$loader" "$odir/mccl-env.json" >/dev/null 2>&1; then
+    perf_bad="$perf_bad 非整数ITERS未报错"
+  fi
+  rm -rf "$odir"
+  if [ -n "$perf_bad" ]; then
+    err "loader 压测参数/override 有问题：$perf_bad"
+  else
+    ok "loader 压测参数派生与 override 合并正确（含非法键/非整数拒绝）"
   fi
 fi
 

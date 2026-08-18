@@ -24,6 +24,15 @@
     MCCL_MACA_LIB_DIR  = MCCL_MACA_PATH + "/lib"
     MCCL_REMOTE_SRC    = MCCL_REMOTE_WORKDIR + "/" + MCCL_REMOTE_SRC_REPO_NAME
     MCCL_LD_LIBRARY_PATH = MCCL_MACA_LIB_DIR + ":" + MCCL_OMPI_LIB_PATH
+    MCCL_PERF_ARGS     = 由 9 个 MCCL_PERF_* raw 键拼出的 all_reduce_perf 参数串
+                         "-b <BEGIN> -e <END> -f <FACTOR> -n <ITERS> -c <CHECK>
+                          -w <WARMUP> -o <OP> -d <DTYPE> -G <GPU_CHECK_ITERS>"
+    MCCL_PERF_OVERRIDDEN_KEYS = 本轮被 override 文件覆盖的 perf 键名（空格分隔，无则空）
+
+压测参数覆盖（自然语言改参的落点）：
+  json 同目录下若存在 mccl-perf-override.json（不入库，见 .gitignore），其中
+  MCCL_PERF_* 键覆盖 mccl-env.json 的同名键后再拼 MCCL_PERF_ARGS。文件里出现
+  非 MCCL_PERF_ 开头的键直接报错（防止写错键名静默不生效）。
 """
 import json
 import os
@@ -47,7 +56,28 @@ REQUIRED_RAW = [
     "MCCL_PERF_BIN_SYM",
     "MCCL_OMPI_LIB_PATH",
     "MCCL_TCP_IF_INCLUDE",
+    # all_reduce_perf 压测参数（9 个，loader 拼成 MCCL_PERF_ARGS；缺任一则报错）
+    "MCCL_PERF_BEGIN",
+    "MCCL_PERF_END",
+    "MCCL_PERF_FACTOR",
+    "MCCL_PERF_ITERS",
+    "MCCL_PERF_WARMUP",
+    "MCCL_PERF_CHECK",
+    "MCCL_PERF_OP",
+    "MCCL_PERF_DTYPE",
+    "MCCL_PERF_GPU_CHECK_ITERS",
 ]
+
+# 必须是整数的 perf 键（用于拼 -f/-n/-w/-c/-G）
+PERF_INT_KEYS = [
+    "MCCL_PERF_FACTOR",
+    "MCCL_PERF_ITERS",
+    "MCCL_PERF_WARMUP",
+    "MCCL_PERF_CHECK",
+    "MCCL_PERF_GPU_CHECK_ITERS",
+]
+
+OVERRIDE_FILENAME = "mccl-perf-override.json"
 
 
 def parse_args(argv):
@@ -80,11 +110,16 @@ def find_json_path(explicit):
     return os.path.join(repo_root, "mccl-env.json")
 
 
-def derive(raw):
-    """从 raw 键算 7 个派生量。"""
+def derive(raw, overridden_keys):
+    """从 raw 键算派生量。"""
     nodes = str(raw["MCCL_NODES"]).split()
     gpus = int(raw["MCCL_GPUS_PER_NODE"])
     maca_lib_dir = "{}/lib".format(raw["MCCL_MACA_PATH"])
+    perf_args = (
+        "-b {MCCL_PERF_BEGIN} -e {MCCL_PERF_END} -f {MCCL_PERF_FACTOR} "
+        "-n {MCCL_PERF_ITERS} -c {MCCL_PERF_CHECK} -w {MCCL_PERF_WARMUP} "
+        "-o {MCCL_PERF_OP} -d {MCCL_PERF_DTYPE} -G {MCCL_PERF_GPU_CHECK_ITERS}"
+    ).format(**{k: raw[k] for k in raw})
     return {
         "MCCL_NODE0_IP": nodes[0],
         "MCCL_NNODES": len(nodes),
@@ -97,7 +132,65 @@ def derive(raw):
         "MCCL_LD_LIBRARY_PATH": "{}:{}".format(
             maca_lib_dir, raw["MCCL_OMPI_LIB_PATH"]
         ),
+        "MCCL_PERF_ARGS": perf_args,
+        "MCCL_PERF_OVERRIDDEN_KEYS": " ".join(sorted(overridden_keys)),
     }
+
+
+def apply_override(raw, json_path):
+    """读 json 同目录的 mccl-perf-override.json，覆盖其中的 MCCL_PERF_* 键。
+
+    返回被覆盖的键名集合。文件不存在=无覆盖；存在但含非 MCCL_PERF_ 开头的键
+    则报错退出（写错键名静默不生效比报错更危险）。
+    """
+    override_path = os.path.join(os.path.dirname(json_path), OVERRIDE_FILENAME)
+    if not os.path.isfile(override_path):
+        return set()
+    with open(override_path, encoding="utf-8") as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError as e:
+            sys.stderr.write(
+                "mccl-env-load: {} 不是合法 JSON：{}\n".format(override_path, e)
+            )
+            sys.exit(1)
+    bad = [k for k in data if not k.startswith("MCCL_PERF_")]
+    if bad:
+        sys.stderr.write(
+            "mccl-env-load: {} 只允许 MCCL_PERF_* 键，发现非法键：{}\n".format(
+                override_path, ", ".join(sorted(bad))
+            )
+        )
+        sys.exit(1)
+    unknown = [k for k in data if k not in REQUIRED_RAW]
+    if unknown:
+        sys.stderr.write(
+            "mccl-env-load: {} 含未知 perf 键：{}（合法键见 mccl-env.json.example）\n".format(
+                override_path, ", ".join(sorted(unknown))
+            )
+        )
+        sys.exit(1)
+    for k, v in data.items():
+        raw[k] = v
+    return set(data)
+
+
+def validate(raw, path):
+    """缺键/非整数键报错退出。"""
+    missing = [k for k in REQUIRED_RAW if k not in raw]
+    if missing:
+        sys.stderr.write(
+            "mccl-env-load: {} 缺少必需键：{}\n".format(path, ", ".join(missing))
+        )
+        sys.exit(1)
+    for k in PERF_INT_KEYS:
+        try:
+            int(raw[k])
+        except (TypeError, ValueError):
+            sys.stderr.write(
+                "mccl-env-load: {} 必须是整数，当前值：{!r}\n".format(k, raw[k])
+            )
+            sys.exit(1)
 
 
 def main():
@@ -115,15 +208,13 @@ def main():
     # 只收 MCCL_ 开头的键，跳过 _comments 等
     raw = {k: v for k, v in data.items() if k.startswith("MCCL_")}
 
-    missing = [k for k in REQUIRED_RAW if k not in raw]
-    if missing:
-        sys.stderr.write(
-            "mccl-env-load: {} 缺少必需键：{}\n".format(path, ", ".join(missing))
-        )
-        sys.exit(1)
+    # override 合并先于缺键校验：override 的键必须是 9 个已知 perf 键之一
+    # （apply_override 里以 REQUIRED_RAW 判定未知键），合并后再统一校验缺键/整数。
+    overridden = apply_override(raw, path)
+    validate(raw, path)
 
     all_vars = dict(raw)
-    all_vars.update(derive(raw))
+    all_vars.update(derive(raw, overridden))
 
     if keys_only:
         for k in all_vars:
