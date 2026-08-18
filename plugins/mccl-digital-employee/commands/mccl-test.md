@@ -16,7 +16,7 @@ description: 测试+报告一条龙：调 mccl-tester 按拓扑（OAM32/OAM64）
 
 不得自己改代码、编译、分发、跑 mpirun（那些是子代理的活）；不自动 commit/push。
 
-调度子代理用你所在 harness 的 Task/Agent 工具，`subagent_type` 填 `mccl-tester` / `mccl-reporter`。每次调用的 prompt 里必须写清楚：读哪些文件（绝对路径）、产物写到哪个目录（绝对路径）--子代理继承的是主会话 CWD，给相对路径会写到别处去。
+调度子代理用你所在 harness 的 Task/Agent 工具。本插件以插件形式安装时，agent 注册名带插件前缀：`subagent_type` 填 `mccl-digital-employee:mccl-tester` / `mccl-digital-employee:mccl-reporter`（先看本 harness 实际列出的可用 agent 名；若不带前缀，则用裸名 `mccl-tester` / `mccl-reporter`）。每次调用的 prompt 里必须写清楚：读哪些文件（绝对路径）、产物写到哪个目录（绝对路径）--子代理继承的是主会话 CWD，给相对路径会写到别处去。
 
 ## 1. 开工前
 

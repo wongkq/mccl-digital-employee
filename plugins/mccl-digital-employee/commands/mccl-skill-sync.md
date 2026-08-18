@@ -19,7 +19,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)" && cd "$REPO_ROOT"
 TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 ```
 
-## 包装 prompt（传给 subagent_type=`mccl-skill-sync`）
+## 包装 prompt（传给 subagent_type=`mccl-digital-employee:mccl-skill-sync`；本 harness 列出的可用 agent 不带前缀时用裸名 `mccl-skill-sync`）
 
 - 根锚定：REPO_ROOT / TOOLKIT_ROOT 绝对路径
 - 把用户输入的 `auto` 参数原样转达，并注明模式区别：
