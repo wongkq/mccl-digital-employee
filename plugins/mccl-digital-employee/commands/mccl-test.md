@@ -56,7 +56,7 @@ git diff > "$RUN_DIR/change.patch"
 ## 4. 调度 mccl-tester（测试）
 
 `Task(mccl-tester)`：
-- prompt 里写清 run 目录绝对路径、产物写该目录：`test-preflight.md`、`test-asymmetric.log`、`test-symmetric.log`、`test-result.md`、异常时 `[test-anomaly.md]`。
+- prompt 里写清 run 目录绝对路径、产物写该目录：`test-preflight.md`、`test-asymmetric.log`、`test-symmetric.log`、`test-result.md`、异常时 `[test-anomaly.md]`；若测试命中驱动 warm reset（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`），tester 会按 15 分钟间隔自动重试至多 5 次，重试日志为 `test-asymmetric.retry-<k>.log`/`test-symmetric.retry-<k>.log`（`agents/mccl-tester.md` 第 5 节），这些文件一并供 reporter 参考。
 - 目录里已有的 `change.patch` / `dev-change.md` / `build.log` 若存在就传给 tester 作参考；不存在就明确告诉它"无上一轮开发产物，md5 基准以构建产物 `$MCCL_REMOTE_SRC/build/libmccl.so` 为准，自行计算"。
 - `mccl-tester` 会独立核对各节点 `libmccl.so` md5（不采信任何自报值）、按 `$MCCL_NNODES` 选拓扑场景、跑 mpirun、落原始日志（`agents/mccl-tester.md`）。
 

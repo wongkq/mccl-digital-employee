@@ -478,6 +478,21 @@ else
   ok "命令 frontmatter 均含 name（Qoder/Claude Code 双端兼容）"
 fi
 
+# --- 29. mccl-tester 含驱动warm reset重试规程（特征字/15分钟间隔/5次上限/重试日志）---
+tf="$PLUGIN_ROOT/agents/mccl-tester.md"
+if [ ! -f "$tf" ]; then
+  err "$tf 缺失"
+else
+  fail29=0
+  for kw in "MX_EVENTTYPE_DRIVER" "mcErrorDriverWarmReset" "15分钟" "5次" "retry-"; do
+    grep -q -- "$kw" "$tf" || { err "$tf 未提及 $kw（驱动warm reset重试规程不完整）"; fail29=1; }
+  done
+  # 边界守卫：规程必须与hang禁令划清界限，且不得与"禁止重启"冲突
+  grep -q "唯一例外" "$tf" || { err "$tf 重试规程未声明为hang禁例外的边界"; fail29=1; }
+  grep -q "禁止重启远程节点" "$tf" || { err "$tf 重试规程未重申禁止重启"; fail29=1; }
+  [ "$fail29" = "1" ] || ok "mccl-tester 驱动warm reset重试规程齐（特征/间隔/次数/重试日志/hang边界）"
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"

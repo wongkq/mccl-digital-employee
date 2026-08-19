@@ -130,9 +130,29 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
    - 停止本轮测试，不再尝试该场景或后续场景，直接上报，等待人工/主控处理。
 3. 除本条列出的采集动作外，不得对hang的进程或所在节点做任何其他操作。这是ABORT级别的禁令，不是"先重试一次看看"。
 
+### 驱动warm reset异常的自动重试（"不重新发起"的唯一例外）
+
+mpirun进程**已退出**后检查该次尝试的日志，若命中以下**任一**特征，判定命中了驱动层warm reset（驱动复位事件，通常可自行恢复）：
+
+- `MX_EVENTTYPE_DRIVER`（完整形态如 `MX_EVENTTYPE_DRIVER data: ResetType=1, ResetCause=1`）
+- `mcErrorDriverWarmReset`（完整形态如 `mcCtxGetCurrent: Returned mcErrorDriverWarmReset`）
+
+处置规程，逐步执行：
+
+1. **该次尝试判失败并进入重试**：日志命中上述任一特征即判该次尝试FAIL，**即使退出码为0**--驱动复位发生在本轮执行期间，该轮的perf数据不可信，不能当PASS用。
+2. **等待15分钟再发起重试**（给驱动/硬件留恢复时间）。注意单次Bash调用有10分钟超时上限，15分钟等待必须分两段（如两次`sleep 450`）。等待期间不发起任何mpirun、不做任何远程操作。
+3. **重新执行同一条mpirun命令**：同场景、同二进制、同`$MCCL_PERF_ARGS`实际展开值、同环境变量，一字不改。重试日志落`test-asymmetric.retry-<k>.log`/`test-symmetric.retry-<k>.log`（`k`=1..5）；首次尝试的日志仍叫`test-asymmetric.log`/`test-symmetric.log`，不覆盖、不合并。每次重试结束后同样核对退出码与上述日志特征。
+4. **重试上限5次**（首次尝试+至多5次重试，同一场景至多6次执行）：
+   - 任一次重试退出码为0且日志**不再**命中驱动复位特征：该场景按该次重试的结果判定，正常继续后续场景；
+   - 5次重试全部失败：**停止本轮测试**--不再重试、不跑后续场景（场景A重试耗尽则不跑场景B，反之亦然），把全过程写入`test-result.md`后直接上报，等待人工/主控处理。
+5. **重试额度按场景独立**：场景A耗掉的重试次数不计入场景B的5次额度；但任一场景耗尽额度即整轮停止（见上条）。
+6. **每次尝试（含重试）都逐条记入`test-result.md`对应场景段**：发起时间、退出码、是否命中驱动复位特征、日志文件名；该场景的最终判定以最后一次执行为准，`test-result.md`里写明依据的是哪一次。
+7. **与hang禁令的边界**：本规程是上文"hang不重新发起"禁令的唯一例外，且只在"mpirun进程已退出 + 日志命中驱动复位特征"两个条件同时成立时适用。进程仍在运行、日志静默超20分钟的是hang，走hang处置（禁止重发、禁止重启），**不得借本规程变相重发hang的进程**。重试是重新执行命令，**不是重启节点**--`references/mccl-safety.md`第3条（禁止重启远程节点）在等待与重试全程同样生效。
+
 ## 6. 已知故障模式（来自`测试.md`的错误处理表）
 
 - **hang（判定见第5节）**：查`dmesg`和IB状态（处置见第5节，禁止重启）。
+- **驱动warm reset（日志含`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`）**：按第5节重试规程处置--15分钟间隔、至多5次重试、额度耗尽即整轮停止上报。这是已知故障模式里唯一走自动重试的一类，其余故障不重试、直接按FAIL上报。
 - **SegFault**：查`MCCL_P2P_LEVEL`是否与固件匹配。
 - **性能回退**：对比Baseline排查编译器优化或环境变量变化。
 - **UDS Connection refused**：确认`$MCCL_MACA_PATH`的`mcMemFabricHandle_t`是1112字节版本（不是80字节的旧版stub）。
@@ -144,12 +164,14 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 - `test-preflight.md`：第4节checklist的七条核对（含压测参数与覆盖状态记录），每条标注核对方式与结果。
 - `test-asymmetric.log`：场景A mpirun的完整原始输出，不摘要。
 - `test-symmetric.log`：场景B mpirun的完整原始输出，不摘要。
+- `test-asymmetric.retry-<k>.log` / `test-symmetric.retry-<k>.log`：仅当触发驱动warm reset重试（第5节）时存在，第`k`次重试的完整原始输出，同样不摘要。
 - `test-anomaly.md`：仅在触发第5节hang处置时产出，内容见第5节第2条。
 - `test-result.md`：每个场景一段，包含：
   - 实际执行的完整mpirun命令（二进制、`$MCCL_PERF_ARGS`实际展开值、是否带`-R 2`均如实写出）
   - 退出码
   - 关键数据（带宽/延迟等perf输出中的核心数字）
   - PASS/FAIL判定：退出码非0、日志中出现已知故障模式关键字（segfault、UDS refused等）、或perf二进制自身报告的正确性校验失败，均判FAIL；否则PASS。
+  - 若触发过驱动warm reset重试（第5节），逐次列出每次尝试的发起时间、退出码、命中特征与日志文件名，并写明最终判定依据哪一次
   - 若命中第6节已知故障模式，注明是哪一类
 
 拓扑不支持（`$MCCL_NNODES`不是4/8，或`$MCCL_GPUS_PER_NODE`不是8）：

@@ -31,8 +31,9 @@ tools: Read, Grep, Glob, Write
 
 来自`mccl-tester`：
 - `test-preflight.md`——执行前checklist六条核对
-- `test-asymmetric.log`（场景A）、`test-symmetric.log`（场景B）——原始mpirun输出
-- `test-result.md`——每场景的命令、退出码、关键数据、PASS/FAIL判定
+- `test-asymmetric.log`（场景A）、`test-symmetric.log`（场景B）——原始mpirun输出（首次尝试）
+- `test-asymmetric.retry-<k>.log` / `test-symmetric.retry-<k>.log`——仅当测试命中驱动warm reset（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`）触发自动重试时存在，第`k`次重试的原始输出
+- `test-result.md`——每场景的命令、退出码、关键数据、PASS/FAIL判定（触发重试时含逐次尝试记录）
 - `test-anomaly.md`——仅在触发hang处置时存在
 
 ## 4. 产出`report-<N>.md`
@@ -51,7 +52,7 @@ tools: Read, Grep, Glob, Write
 是否通过、新增warning、产物md5——均来自`build.log`（以及`dev-change.md`"编译结果"字段中可与`build.log`交叉核实的部分）。找不到出处的编译细节，标"未覆盖"。
 
 ### 测试覆盖
-场景A、场景B各自的命令、结果、关键数据，来自`test-result.md`与对应的`test-*.log`。任一场景`test-result.md`标注"未跑"或对应日志缺失，本节原样写"未覆盖"及原因，不得从另一场景的结果推断这个场景大概率也是什么结果。
+场景A、场景B各自的命令、结果、关键数据，来自`test-result.md`与对应的`test-*.log`。任一场景`test-result.md`标注"未跑"或对应日志缺失，本节原样写"未覆盖"及原因，不得从另一场景的结果推断这个场景大概率也是什么结果。`test-result.md`记录了驱动warm reset自动重试的（`test-*.retry-<k>.log`存在），逐次转述各次尝试的结果、写明最终判定依据哪一次，重试期间命中的异常关键字不得省略--"重试后通过"和"一次通过"对能否commit的判断不是一回事。
 
 ### 与基线对比
 若`test-result.md`或日志中含基线对比数据，转述；没有基线数据，写"未覆盖"。
