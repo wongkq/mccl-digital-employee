@@ -14,7 +14,7 @@
 | 6 | 测试FAIL时**不删除远程源码**（保留供下一轮增量编译用） | REWORK |
 | 7 | 交付的diff中不得残留调试代码。调试期间允许用`printf`/`cout`/`MCCL_DEBUG`宏，但提交前必须清掉 | REWORK |
 | 8 | 绕过性改动（跳过某段逻辑/禁用某个检查/注释掉失败的代码让测试先过）必须在产出中显式声明，不得静默混入正常改动里 | 标记，需人工决策 |
-| 9 | 探测器（`mccl-prober` / `bin/mccl-gpu-probe`）只做只读探测，禁止杀进程、改文件、重启节点。发现 GPU 被占用只如实上报 | ABORT |
-| 10 | 调度器（`bin/mccl-queue-scheduler`）stop 只 kill 自己起的 /mccl-bench 测试进程，不杀无关进程、不重启节点 | ABORT |
+| 9 | 探测器（`mccl-prober` / `bin/mccl-gpu-probe`）只做只读探测，禁止杀进程、改文件、重启节点。发现 GPU 被占用只如实上报。**唯一例外**：定时任务调度链路（`bin/mccl-queue-scheduler` 调度循环以 `--free-occupied` 调 `mccl-gpu-probe`）遇 GPU 被占用时，允许 kill 掉 mx-smi 报告的占用进程后继续测试。例外约束：仅限`$MCCL_NODES`上的 GPU 占用进程；本流水线自身的测试进程（`mpirun`/`all_reduce_perf`/`gpu_health_check`）与 PID≤1 不得杀；每次 kill 与跳过逐条记入 `gpu-verdict.json` 的 `occupancy.killed`；改文件、重启节点在例外中仍然禁止。交互式探测（`mccl-prober` agent）不传该参数，仍只读上报 | ABORT |
+| 10 | 调度器（`bin/mccl-queue-scheduler`）stop 只 kill 自己起的 /mccl-bench 测试进程，不杀无关进程、不重启节点（定时链路的 GPU 占用清理例外见第9条，同样不重启节点） | ABORT |
 
 第8条不是"禁止绕过式改动"——有时绕过是唯一可行的临时手段，但**必须让审查者知道这是绕过，而不是真正的修复**。参见`references/mccl-domain.md`第8节：`021417e`、`a703e97`两个静默跳过跨节点LSA/UDS路径的补丁，都已被revert，替换成了处理根因的正式方案。绕过式改动不声明，最终都要返工。

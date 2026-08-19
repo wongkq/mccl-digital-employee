@@ -421,7 +421,7 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
 **三态都不消耗测试预算**--门禁是环境问题，NOT_READY 等下轮不跑测试。
 
 **已知限制**：
-- 占用判定"有进程即占用"是最严判定。集群若有常驻监控/守护进程占某卡，门禁会恒 NOT_READY。预留白名单/PID 过滤作为未来收紧项，v1 不做。
+- 占用判定"有进程即占用"是最严判定。集群若有常驻监控/守护进程占某卡，**交互式门禁会恒 NOT_READY**（预留白名单/PID 过滤作为未来收紧项，v1 不做）。**定时任务链路不受此困**：调度循环探测带 `--free-occupied`，遇占用先 kill 占用进程再复查（见下方"调度器怎么跑"），清理后空闲即照常派发。
 - `gpu_health_check.sh` 已脱敏并入库：默认 `HOSTS=()` / `SSH_PASS=""`（占位），真实主机与密码由调用方经 `--hosts <csv>` / `GHC_HOSTS` / `GHC_SSH_PASS` 注入。打包脚本 `bin/mccl-gpu-probe` 照常全用 `$MCCL_*`，自身无 IP/密码。严禁把真实主机/密码写回 `gpu_health_check.sh` 后再提交。
 - mx-smi 占用判定的输出格式假设仿 nvidia-smi 的 `Processes:` 段，需在真实硬件上校准；探测器的远程执行行为本仓库无法端到端验证，首用建议人工盯一轮。
 
@@ -452,7 +452,7 @@ CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存
 ```
 提交后进同一队列，调度器 5 分钟轮询消费。
 
-**调度器怎么跑**：`bin/mccl-queue-scheduler`（无参数=调度循环）被 cron 触发时：flock 加锁 -> 读 `.mccl-bench-queue/queue.json` -> 检查 pause/stop 标志 -> 调 prober 探测 -> READY 输出 `DISPATCH:<task_id>:<params>` 交 Claude 跑 `/mccl-bench` -> NOT_READY 输出 `WAIT` 等下轮。无状态、崩溃下轮 cron 恢复。
+**调度器怎么跑**：`bin/mccl-queue-scheduler`（无参数=调度循环）被 cron 触发时：flock 加锁 -> 读 `.mccl-bench-queue/queue.json` -> 检查 pause/stop 标志 -> 调 prober 探测（**带 `--free-occupied`**：遇 GPU 被占用先 kill 占用进程再复查一次，任务不再因外部进程占用而无限 WAIT。仅限 `$MCCL_NODES` 上的 GPU 占用进程；本流水线自身的 `mpirun`/`all_reduce_perf` 进程与 PID≤1 跳过不杀；每次 kill 与跳过逐条记入 `gpu-verdict.json` 的 `occupancy.killed`，清理后仍占用照旧 WAIT。约束见 `references/mccl-safety.md` 第9条例外；交互式 `mccl-prober` 不传该参数、仍只读上报）-> READY 输出 `DISPATCH:<task_id>:<params>` 交 Claude 跑 `/mccl-bench` -> NOT_READY 输出 `WAIT` 等下轮。无状态、崩溃下轮 cron 恢复。
 
 **CronCreate 调度提示**（注册 cron 时用这个 prompt 触发调度循环）：
 ```
@@ -502,6 +502,7 @@ CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存
 | 报告里写"缺失"，日志明明跑了 | 日志落在远端了 | `ssh`的重定向必须在引号**外面**：`ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<命令>" > "$RUN_DIR/build.log" 2>&1`，写成`ssh ... "<命令> > build.log 2>&1"`日志就留在远端（`references/mccl-remote-ops.md`§0.6）。`mccl-reporter`没有Bash、取不了远程文件，日志不在本地对它等同不存在 |
 | mpirun hang（判定见 `mccl-tester.md` §5） | 见`test-anomaly.md` | **禁止重启**（`references/mccl-safety.md`第3条）。agent会采`dmesg`+IB状态后停下等你（`agents/mccl-tester.md`第5节）。你也别手动重启——这条是`测试.md`原始规程里的硬禁令 |
 | 日志里出现 `MX_EVENTTYPE_DRIVER data: ResetType=1, ResetCause=1` / `mcCtxGetCurrent: Returned mcErrorDriverWarmReset` | 驱动warm reset（已知故障模式中唯一自动重试的一类） | agent会自行按15分钟间隔重试同一命令至多5次（`agents/mccl-tester.md`第5节重试规程），每次尝试（含重试）的记录都在`test-result.md`，重试日志为`test-*.retry-<k>.log`。5次均失败则该场景判FAIL并转去跑另一个场景--单场景失败（含其他故障，如SegFault）不中断整轮，两个场景各自独立判定；但hang例外，hang仍按原规程整轮停止 |
+| 定时任务一直 WAIT，提示环境未就绪 | GPU 被外部进程占用（或带宽/bin/拓扑问题） | 调度循环探测带 `--free-occupied`：外部占用进程会被自动 kill（term，10 秒存活再 kill -9）后复查，清干净即派发。仍 WAIT 说明占用清不掉（本流水线自身进程、PID≤1、或非占用原因）--查 `.mccl-bench-queue/scheduler.log` 与 `probe-*.json` 的 `occupancy.killed`，kill 明细都在里面。**交互式**探测（`mccl-prober`/手动跑 `mccl-gpu-probe`）不杀进程只上报，要清需自己处理 |
 | SegFault | 已知故障模式 | 查`MCCL_P2P_LEVEL`是否与固件匹配（`agents/mccl-tester.md`第6节）。该场景判FAIL后继续跑另一场景，不中断整轮 |
 | UDS Connection refused | 已知故障模式 | 确认`$MCCL_MACA_PATH`的`mcMemFabricHandle_t`是1112字节版本，不是80字节旧版stub（`agents/mccl-tester.md`第6节、`mccl-env.json.example`的 `_comments.maca_path`） |
 

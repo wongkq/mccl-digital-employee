@@ -4,6 +4,9 @@
 # 复用 gpu_health_check.sh 作带宽/健康引擎，补占用检测与结构化 verdict。
 # 产物 gpu-verdict.json，三态 verdict: READY / NOT_READY / error。
 # 只读不改：不杀进程、不改文件、不重启节点（references/mccl-safety.md 第9条）。
+# 唯一例外：--free-occupied（定时任务调度链路专用，由 bin/mccl-queue-scheduler
+# 传入）允许 kill 掉 GPU 占用进程后复查，约束见 safety 第9条例外与 free_occupied 注释；
+# 交互式调用（mccl-prober agent）不传该参数，行为仍为只读上报。
 #
 # 退出码（脚本独立调用契约；主控流水线内只读 gpu-verdict.json 的 verdict 字段）：
 #   0 = READY, 1 = NOT_READY, 2 = error
@@ -64,6 +67,8 @@ try: hosts = json.loads(os.environ.get("V_HOSTS_JSON", "[]"))
 except Exception: hosts = []
 try: occ = json.loads(os.environ.get("V_OCC_JSON", "{}"))
 except Exception: occ = {}
+try: occ["killed"] = json.loads(os.environ.get("V_KILLS_JSON", "[]"))
+except Exception: occ["killed"] = []
 failures = [l for l in os.environ.get("V_FAILURES", "").splitlines() if l]
 doc = {
   "verdict": g("V_VERDICT", "error"),
@@ -84,6 +89,62 @@ PY
 }
 
 # ===================== 环境与根解析 =====================
+
+# extract_gpu_pids <mx-smi_output> - 纯函数：从 mx-smi 输出的 Processes: 段提取占用进程 PID。
+# 数据行形态与 check_occupancy 的占用判定同源（GPU序号 PID ...，仿 nvidia-smi），PID 为第 2 列。
+# 去重、升序；PID<=1（init/内核线程）一律剔除--那是 kill 红线。无进程输出空。
+extract_gpu_pids() {
+  printf '%s' "$1" | sed -n '/Processes:/,$p' \
+    | awk '$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $2+0 > 1 { print $2+0 }' \
+    | sort -un
+}
+
+# free_occupied: --free-occupied 模式下清理 GPU 占用进程（定时任务调度链路专用，
+# 见 references/mccl-safety.md 第9条例外）。逐主机：
+#   1) mx-smi 提取占用 PID；
+#   2) 逐 PID 查 cmdline（远程 ps）：本流水线自身进程（mpirun/all_reduce_perf/
+#      gpu_health_check/mccl_ghc）与 cmdline 查不到的 PID 只记录、跳过不杀
+#      （可能是还活着的上一轮测试，杀了等于静默打断自己在跑的轮次）；
+#   3) 可杀的先 kill -15，10 秒后仍存活的再 kill -9。
+# 每个动作（含跳过）逐条记入 KILLS_JSON（落 gpu-verdict.json 的 occupancy.killed）
+# 与 KILL_LOG（并入 failures，gpu-preflight.md 可见）。清理后由调用方重跑
+# check_occupancy 复查；仍占用则 verdict 照旧 NOT_READY，等下轮。
+free_occupied() {
+  KILLS_JSON='[]'; KILL_LOG=""
+  _kills_add() {  # <host> <pid> <action> <cmd>
+    KILLS_JSON=$(python3 -c '
+import json,sys
+arr=json.loads(sys.argv[1])
+arr.append({"host":sys.argv[2],"pid":int(sys.argv[3]),"action":sys.argv[4],"cmd":sys.argv[5]})
+print(json.dumps(arr,ensure_ascii=False))' "$KILLS_JSON" "$1" "$2" "$3" "$4")
+    KILL_LOG="${KILL_LOG}${KILL_LOG:+$'\n'}占用清理 $1 pid=$2 $3: $4"
+  }
+  local host out pids pid cmd cl killable
+  for host in $MCCL_NODES; do
+    out=$(ssh_exec_read "$host" "mx-smi 2>&1") || out=""
+    pids=$(extract_gpu_pids "$out")
+    [ -n "$pids" ] || continue
+    # 注意双引号内的 $p/$ps 必须转义给远端展开，不能在本地求值
+    cl=$(ssh_exec_read "$host" "for p in $pids; do echo \"\$p|\$(ps -o args= -p \$p 2>/dev/null)\"; done")
+    killable=""
+    while IFS='|' read -r pid cmd; do
+      case "$pid" in ''|*[!0-9]*) continue;; esac
+      case "$cmd" in
+        ""|*mpirun*|*all_reduce_perf*|*gpu_health_check*|*mccl_ghc*)
+          _kills_add "$host" "$pid" "skip-流水线进程或cmdline不可查" "$cmd"
+          ;;
+        *)
+          killable="$killable $pid"
+          ;;
+      esac
+    done <<< "$cl"
+    [ -n "$killable" ] || continue
+    ssh_exec_read "$host" "kill -15 $killable 2>/dev/null; sleep 10; for p in $killable; do kill -0 \$p 2>/dev/null && kill -9 \$p 2>/dev/null; done" >/dev/null
+    for pid in $killable; do
+      _kills_add "$host" "$pid" "killed(term,10s后存活则kill-9)" ""
+    done
+  done
+}
 
 resolve_toolkit_root() {
   if [ -n "${QODER_PLUGIN_ROOT:-}" ] && [ -f "${QODER_PLUGIN_ROOT}/references/mccl-safety.md" ]; then
@@ -120,6 +181,9 @@ GPU 环境探测原语（MCCL 子系统①）。复用 gpu_health_check.sh，输
   --hosts IP1 IP2...  覆盖主机列表(v1 预留：当前取自 mccl-env.json 的 MCCL_NODES)
   --reuse-bw <dir>    带宽缓存目录(同 run 的后续 attempt 复用；缓存为空自动跑并填充)
   --no-bw-cache       强制重测带宽
+  --free-occupied     发现 GPU 被占用时 kill 占用进程后复查一次(定时任务调度链路专用；
+                      本流水线自身 mpirun/all_reduce_perf 进程与 PID<=1 跳过不杀，
+                      动作逐条记入 gpu-verdict.json 的 occupancy.killed。见 safety 第9条例外)
   --out <path>        gpu-verdict.json 输出路径(缺省打到 stdout)
   --probe-cmd <cmd>   覆盖探测命令(v1 预留：拓扑/bin 取自 mccl-env.json)
   --bin <path>        覆盖 bin 路径(v1 预留)
@@ -228,18 +292,20 @@ run_bandwidth() {
 emit_error_json() {  # <msg>：脚本自身出错时也写一份合法 error JSON（减少依赖 agent 兜底）
   export V_VERDICT=error V_MODE="${MODE_OUT:-full}" V_NNODES=0 V_GPUS=0 V_TMODE="" V_TOPO_OK=0
   export V_BW_FAIL=0 V_BW_ERROR=0 V_BW_WARN=0 V_BW_CACHED=0 V_BW_REPORT="" V_OCC_JSON='{"all_free":true,"occupied":[]}'
+  export V_KILLS_JSON="[]"
   export V_HOSTS_JSON="[]" V_BINS_SYM=0 V_BINS_ASYM=0 V_BINS_MPI=0 V_EVIDENCE_LOGS="" V_FAILURES="$1"
   if [ -n "${PROBE_OUT:-}" ]; then emit_json > "$PROBE_OUT"; else emit_json; fi
 }
 
 main() {
-  local mode=full hosts="" reuse_bw="" no_bw_cache=0 probe_cmd="" bin_override="" out=""
+  local mode=full hosts="" reuse_bw="" no_bw_cache=0 probe_cmd="" bin_override="" out="" free_occ=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --mode) mode="$2"; shift 2;;
       --hosts) hosts="$2"; shift 2;;
       --reuse-bw) reuse_bw="$2"; shift 2;;
       --no-bw-cache) no_bw_cache=1; shift;;
+      --free-occupied) free_occ=1; shift;;
       --out) out="$2"; shift 2;;
       --probe-cmd) probe_cmd="$2"; shift 2;;
       --bin) bin_override="$2"; shift 2;;
@@ -248,7 +314,7 @@ main() {
     esac
   done
   NO_BW_CACHE=""; [ $no_bw_cache -eq 1 ] && NO_BW_CACHE=1
-  MODE_OUT="$mode"; PROBE_OUT="$out"
+  MODE_OUT="$mode"; PROBE_OUT="$out"; FREE_OCC="$free_occ"
 
   load_env || { emit_error_json "环境加载失败（mccl-env.json 缺失/不在 git 仓库/python3 缺）"; exit 2; }
 
@@ -265,6 +331,13 @@ main() {
     || { bins_ok_v=0; add_failure "bin 未就绪: sym=$BINS_SYM asym=$BINS_ASYM mpirun=$BINS_MPI"; }
 
   check_occupancy || { emit_error_json "占用检查 ssh 失败"; exit 2; }
+  # 定时任务链路（--free-occupied，仅 bin/mccl-queue-scheduler 传入）：占用时先清理
+  # 占用进程再复查一次；不传该参数（交互式探测）不走这段，行为与原先完全一致。
+  if [ "${OCC_N:-0}" -gt 0 ] 2>/dev/null && [ "${FREE_OCC:-0}" = "1" ]; then
+    free_occupied
+    [ -n "$KILL_LOG" ] && FAILURES="${FAILURES}${FAILURES:+$'\n'}$KILL_LOG"
+    check_occupancy || { emit_error_json "占用复查 ssh 失败"; exit 2; }
+  fi
   occ_n="$OCC_N"
   [ -n "$OCC_FAILURES" ] && FAILURES="${FAILURES}${FAILURES:+$'\n'}$OCC_FAILURES"
 
@@ -286,6 +359,7 @@ main() {
   export V_BW_FAIL="${BW_FAIL:-0}" V_BW_ERROR="${BW_ERROR:-0}" V_BW_WARN="${BW_WARN:-0}"
   export V_BW_CACHED="${BW_CACHED:-0}" V_BW_REPORT="${BW_REPORT:-}"
   export V_OCC_JSON="$OCC_JSON" V_HOSTS_JSON="[]" V_BINS_SYM="$BINS_SYM" V_BINS_ASYM="$BINS_ASYM" V_BINS_MPI="$BINS_MPI"
+  export V_KILLS_JSON="${KILLS_JSON:-[]}"
   export V_EVIDENCE_LOGS="" V_FAILURES="$FAILURES"
   if [ -n "$PROBE_OUT" ]; then emit_json > "$PROBE_OUT"; else emit_json; fi
 

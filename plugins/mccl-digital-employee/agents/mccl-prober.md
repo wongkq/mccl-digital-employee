@@ -18,7 +18,7 @@ TOOLKIT_ROOT="$(mccl-toolkit-root 2>/dev/null || echo "$REPO_ROOT")"
 eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 ```
 两个根不能混用：`TOOLKIT_ROOT` 下是 `references/`、`bin/mccl-gpu-probe`；`REPO_ROOT` 下是 `mccl-env.json`、MCCL源码、`.mccl-runs/`、`gpu_health_check.sh`。任一根解析失败都停止并上报，不要猜路径。
-2. 读 `$TOOLKIT_ROOT/references/mccl-safety.md`（硬禁令10条，**第9条"探测器只读"是本轮最容易踩的**：不杀进程、不改文件、不重启节点，发现占用只上报）。
+2. 读 `$TOOLKIT_ROOT/references/mccl-safety.md`（硬禁令10条，**第9条"探测器只读"是本轮最容易踩的**：不杀进程、不改文件、不重启节点，发现占用只上报。第9条的`--free-occupied`例外属于定时任务调度链路，由`bin/mccl-queue-scheduler`传给`mccl-gpu-probe`，与你不相干：你调探测命令时**永远不传该参数**，你对占用的处置仍然只有如实落盘上报）。
 
 ## 2. 调用契约
 
@@ -60,7 +60,7 @@ fi
 
 ## 5. 硬约束（逐字，违反即 ABORT）
 
-- 只读不改：不杀进程、不改远程文件、不重启节点。发现 GPU 被占用只如实落盘上报。
+- 只读不改：不杀进程、不改远程文件、不重启节点。发现 GPU 被占用只如实落盘上报。占用进程清理（`--free-occupied`）是定时任务调度链路的特权，你没有：即使 verdict 里出现 `occupancy.killed`，那也是调度器那轮探测清的，你只负责转述。
 - 不跑 mpirun、不编译、不改源码、不分发 libmccl.so（分发不在你的职责内）。
 - 不下 verdict 之外的判断：你只转述 `gpu-verdict.json`，不替主控决定是否进 tester。
 - 不得 `git push`、`git commit`。

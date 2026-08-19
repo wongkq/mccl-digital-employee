@@ -85,6 +85,41 @@ unset -f ssh_exec_read
 # shellcheck source=/dev/null
 . "$PROBE" 2>/dev/null
 
+# --- 6. extract_gpu_pids：Processes 段提取 PID（去重、剔除 PID<=1、跳过表头）---
+mxsmi_out='Attached GPUs: 8
++------------------------------+
+| MCCL Version: 3.1.0          |
++------------------------------+
+
+Processes:
+  GPU    PID   Type  Process name
+    0    1234   C    python train.py
+    1    1234   C    python train.py
+    2    5678   C    ./a.out
+    3       1   C    systemd
+  No running processes found'
+assert_eq "pids dedup/sorted/gt1" "1234 5678" "$(extract_gpu_pids "$mxsmi_out" | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "pids empty when no proc" "" "$(extract_gpu_pids 'Attached GPUs: 8
+Processes:
+  No running processes found')"
+
+# --- 7. emit_json：occupancy.killed 审计字段（--free-occupied 清理记录）---
+export V_VERDICT=READY V_MODE=quick V_NNODES=4 V_GPUS=8 V_TMODE=OAM32 V_TOPO_OK=1
+export V_BW_FAIL=0 V_BW_ERROR=0 V_BW_WARN=0 V_BW_CACHED=0 V_BW_REPORT=""
+export V_OCC_JSON='{"all_free":true,"occupied":[]}'
+export V_KILLS_JSON='[{"host":"h1","pid":123,"action":"killed(term,10s后存活则kill-9)","cmd":""},{"host":"h1","pid":456,"action":"skip-流水线进程或cmdline不可查","cmd":"mpirun ..."}]'
+export V_HOSTS_JSON='[]' V_BINS_SYM=1 V_BINS_ASYM=1 V_BINS_MPI=1 V_EVIDENCE_LOGS="" V_FAILURES=""
+doc=$(emit_json)
+kn=$(printf '%s' "$doc" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["occupancy"]["killed"]))')
+assert_eq "emit killed count 2" "2" "$kn"
+ka=$(printf '%s' "$doc" | python3 -c 'import json,sys;print(json.load(sys.stdin)["occupancy"]["killed"][0]["action"])')
+assert_eq "emit killed[0].action" "killed(term,10s后存活则kill-9)" "$ka"
+# 未传 V_KILLS_JSON 时 killed 默认空数组（向后兼容旧调用）
+unset V_KILLS_JSON
+doc=$(emit_json)
+kn=$(printf '%s' "$doc" | python3 -c 'import json,sys;print(json.load(sys.stdin)["occupancy"]["killed"])')
+assert_eq "emit killed default []" "[]" "$kn"
+
 echo
 [ "$fail" -eq 0 ] && echo "gpu-probe 测试全部通过 ($pass)" || echo "gpu-probe 测试有失败 ($fail)"
 exit "$fail"

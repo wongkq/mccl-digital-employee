@@ -165,10 +165,12 @@ schedule_loop() {
     echo "STOP:$head"; return 0
   fi
 
-  # 探测环境（调① mccl-gpu-probe）
+  # 探测环境（调① mccl-gpu-probe）。--free-occupied：定时任务链路遇 GPU 被占用时
+  # 先 kill 占用进程再复查（本流水线自身进程跳过、逐条记录，约束见 safety 第9条例外），
+  # 清理后空闲即可 DISPATCH，任务不再因外部进程占用而无限 WAIT。
   local probe_out="$qd/probe-$(date +%s).json"
   local probe_rc=0
-  "$TOOLKIT_ROOT/bin/mccl-gpu-probe" --mode full --reuse-bw "$qd/.bw-cache" --out "$probe_out" 2>>"$log" || probe_rc=$?
+  "$TOOLKIT_ROOT/bin/mccl-gpu-probe" --mode full --free-occupied --reuse-bw "$qd/.bw-cache" --out "$probe_out" 2>>"$log" || probe_rc=$?
 
   # 读 verdict（prober 退出码：0=READY 1=NOT_READY 2=error；但主控契约是读 JSON verdict 字段）
   local verdict
@@ -190,6 +192,11 @@ for t in d.get("tasks",[]):
       echo "DISPATCH:$head:$params"
       ;;
     NOT_READY)
+      local killed_n
+      killed_n=$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1])).get("occupancy",{}).get("killed",[])))' "$probe_out" 2>/dev/null || echo 0)
+      if [ "${killed_n:-0}" -gt 0 ] 2>/dev/null; then
+        echo "$(date '+%F %T'): 任务 $head 本轮清理占用进程 ${killed_n} 个（明细见 $probe_out 的 occupancy.killed），清理后仍 NOT_READY" >> "$log"
+      fi
       echo "$(date '+%F %T'): 任务 $head 等待环境（NOT_READY）" >> "$log"
       echo "WAIT:$head:环境未就绪"
       ;;

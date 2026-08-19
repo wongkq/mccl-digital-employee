@@ -256,7 +256,7 @@ else
   if [ "$help_rc" -ne 0 ]; then
     err "$probe --help 退出码非 0 ($help_rc)"
   else
-    for kw in --mode --hosts --reuse-bw; do
+    for kw in --mode --hosts --reuse-bw --free-occupied; do
       echo "$help_out" | grep -q -- "$kw" || err "$probe --help 未提及 $kw"
     done
     [ "$fail" -eq 0 ] && ok "bin/mccl-gpu-probe --help 合法" || true
@@ -504,6 +504,21 @@ for f in "$PLUGIN_ROOT/commands/mccl-test.md" "$PLUGIN_ROOT/agents/mccl-tester.m
   done
 done
 [ -n "$sum_bad" ] || ok "执行摘要六字段齐（mccl-test 下发即输出 + mccl-tester preflight 首部）"
+
+# --- 31. 定时任务占用清理链路闭合（scheduler 传 --free-occupied；safety 第9条含例外；
+#         prober agent 声明自己不用该例外；gpu-probe 有 kill 审计字段）---
+fail31=0
+grep -q -- '--free-occupied' "$PLUGIN_ROOT/bin/mccl-queue-scheduler" \
+  || { err "mccl-queue-scheduler 未传 --free-occupied（定时任务遇占用仍无限 WAIT）"; fail31=1; }
+for kw in "--free-occupied" "例外" "occupancy.killed"; do
+  grep -q -- "$kw" "$PLUGIN_ROOT/references/mccl-safety.md" \
+    || { err "mccl-safety.md 未提及 $kw（占用清理例外未受约束）"; fail31=1; }
+done
+grep -q -- '--free-occupied' "$PLUGIN_ROOT/agents/mccl-prober.md" \
+  || { err "mccl-prober agent 未声明 --free-occupied 例外归属（防 prober 越权杀进程）"; fail31=1; }
+grep -q -- 'V_KILLS_JSON' "$PLUGIN_ROOT/bin/mccl-gpu-probe" \
+  || { err "mccl-gpu-probe 缺 kill 审计字段（occupancy.killed）"; fail31=1; }
+[ "$fail31" = "1" ] || ok "定时任务占用清理链路闭合（scheduler传参/safety例外/prober只读/kill审计）"
 
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
