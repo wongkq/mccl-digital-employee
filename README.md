@@ -15,7 +15,7 @@ MCCL（MetaX Collective Communications Library）数字员工工具包：当前�
 
 | Agent | 职责 | 工具 |
 |---|---|---|
-| `mccl-tester` | 按`$MCCL_NNODES`选择拓扑：多节点（4/8，每节点8卡）跑场景A（非对称内存）+ 场景B（对称内存）两个`mpirun`测试；其余拓扑（含单节点）判为不支持、停止上报。压测参数从`mccl-env.json`的`MCCL_PERF_*`键读取（支持`mccl-perf-override.json`临时覆盖）。日志命中驱动warm reset特征（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`）时按15分钟间隔自动重试至多5次，额度耗尽即整轮停止上报。产出原始日志。不改代码、不重新编译。 | 含Bash |
+| `mccl-tester` | 按`$MCCL_NNODES`选择拓扑：多节点（4/8，每节点8卡）跑场景A（非对称内存）+ 场景B（对称内存）两个`mpirun`测试；其余拓扑（含单节点）判为不支持、停止上报。压测参数从`mccl-env.json`的`MCCL_PERF_*`键读取（支持`mccl-perf-override.json`临时覆盖）。日志命中驱动warm reset特征（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`）时按15分钟间隔自动重试至多5次，额度耗尽即放弃该场景、转下一个场景继续（单场景失败不中断整轮）。产出原始日志。不改代码、不重新编译。 | 含Bash |
 | `mccl-reporter` | 读run目录产物，写验证报告，每个数字必须能在原始日志里找到出处，未覆盖场景标"未覆盖"不得推断。 | **无Bash**（见下） |
 
 编排入口（当前可用）：`/mccl-test`（测试+报告一条龙）。原完整流水线入口 `/mccl-run` 已废弃（依赖已移除的 developer/supervisor），`/mccl-bench`、`/mccl-impact-run` 同样废弃。
@@ -501,8 +501,8 @@ CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存
 | agent拒绝执行，说拓扑不受支持 | `MCCL_NNODES`不是4/8（含单节点），**或**每节点卡数`MCCL_GPUS_PER_NODE`不是8而节点数是4/8（如"4节点2卡"） | 能测对称内存的组合只有 (8卡,4节点) 和 (8卡,8节点)——`nodeSize=8`是PCIe Switch硬件决定、代码硬编码的。偏离这个的配置，`CliqueManager::IsSupported()`不匹配，对称内存不启用、静默fallback到Ring/Tree，**测出来的不是你以为在测的东西**，拒绝比跑更安全。单节点冒烟场景已于 2026-08 移除，配置1个节点同样会被拒绝（`agents/mccl-tester.md`第2节） |
 | 报告里写"缺失"，日志明明跑了 | 日志落在远端了 | `ssh`的重定向必须在引号**外面**：`ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<命令>" > "$RUN_DIR/build.log" 2>&1`，写成`ssh ... "<命令> > build.log 2>&1"`日志就留在远端（`references/mccl-remote-ops.md`§0.6）。`mccl-reporter`没有Bash、取不了远程文件，日志不在本地对它等同不存在 |
 | mpirun hang（判定见 `mccl-tester.md` §5） | 见`test-anomaly.md` | **禁止重启**（`references/mccl-safety.md`第3条）。agent会采`dmesg`+IB状态后停下等你（`agents/mccl-tester.md`第5节）。你也别手动重启——这条是`测试.md`原始规程里的硬禁令 |
-| 日志里出现 `MX_EVENTTYPE_DRIVER data: ResetType=1, ResetCause=1` / `mcCtxGetCurrent: Returned mcErrorDriverWarmReset` | 驱动warm reset（已知故障模式中唯一自动重试的一类） | agent会自行按15分钟间隔重试同一命令至多5次（`agents/mccl-tester.md`第5节重试规程），每次尝试（含重试）的记录都在`test-result.md`，重试日志为`test-*.retry-<k>.log`。5次均失败则agent停止整轮测试并上报，此时等人工处理，不要让agent"再多试几次" |
-| SegFault | 已知故障模式 | 查`MCCL_P2P_LEVEL`是否与固件匹配（`agents/mccl-tester.md`第6节） |
+| 日志里出现 `MX_EVENTTYPE_DRIVER data: ResetType=1, ResetCause=1` / `mcCtxGetCurrent: Returned mcErrorDriverWarmReset` | 驱动warm reset（已知故障模式中唯一自动重试的一类） | agent会自行按15分钟间隔重试同一命令至多5次（`agents/mccl-tester.md`第5节重试规程），每次尝试（含重试）的记录都在`test-result.md`，重试日志为`test-*.retry-<k>.log`。5次均失败则该场景判FAIL并转去跑另一个场景--单场景失败（含其他故障，如SegFault）不中断整轮，两个场景各自独立判定；但hang例外，hang仍按原规程整轮停止 |
+| SegFault | 已知故障模式 | 查`MCCL_P2P_LEVEL`是否与固件匹配（`agents/mccl-tester.md`第6节）。该场景判FAIL后继续跑另一场景，不中断整轮 |
 | UDS Connection refused | 已知故障模式 | 确认`$MCCL_MACA_PATH`的`mcMemFabricHandle_t`是1112字节版本，不是80字节旧版stub（`agents/mccl-tester.md`第6节、`mccl-env.json.example`的 `_comments.maca_path`） |
 
 ## 各角色边界速查

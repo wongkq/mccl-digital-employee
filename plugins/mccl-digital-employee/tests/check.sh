@@ -484,7 +484,7 @@ if [ ! -f "$tf" ]; then
   err "$tf 缺失"
 else
   fail29=0
-  for kw in "MX_EVENTTYPE_DRIVER" "mcErrorDriverWarmReset" "15分钟" "5次" "retry-"; do
+  for kw in "MX_EVENTTYPE_DRIVER" "mcErrorDriverWarmReset" "15分钟" "5次" "retry-" "不中断整轮"; do
     grep -q -- "$kw" "$tf" || { err "$tf 未提及 $kw（驱动warm reset重试规程不完整）"; fail29=1; }
   done
   # 边界守卫：规程必须与hang禁令划清界限，且不得与"禁止重启"冲突
