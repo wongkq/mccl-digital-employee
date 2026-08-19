@@ -53,6 +53,19 @@ git diff > "$RUN_DIR/change.patch"
 
 `dev-change.md`/`build.log` 若用户手动放进过 `$RUN_DIR/` 则一并供 reporter 参考；没有就由 reporter 标"缺失"，不要自己编。
 
+## 3.5 执行摘要（下发即输出）
+
+调度 `mccl-tester` 之前，向用户输出一块六字段执行摘要--这是用户下发任务后看到的第一屏，不必翻产物就知道这轮跑什么、基准是什么。六个字段一个不能少：
+
+- **执行时间**：`date '+%Y-%m-%d %H:%M:%S'` 的实际输出（本轮测试发起时刻）。
+- **前置分发**：经`$MCCL_NODE0_IP`跳板（`ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "..."`，宿主机层、只读）对`$MCCL_NODES`每个节点的`$MCCL_MACA_LIB_DIR/libmccl.so`与基准`$MCCL_REMOTE_SRC/build/libmccl.so`各做一次`md5sum`（共`$MCCL_NNODES + 1`份），逐份列出节点与md5；有任何不一致，在摘要里标出并注明"tester preflight 将判FAIL、本轮测试不会开跑"。
+- **测试规模**：`$MCCL_NNODES`节点 × `$MCCL_GPUS_PER_NODE`卡、`-np $MCCL_NP`、拓扑判定（OAM32/OAM64/不支持）、`$MCCL_PERF_ARGS`实际展开值；`$MCCL_PERF_OVERRIDDEN_KEYS`非空时注明哪些键被覆盖。
+- **产物目录**：`$RUN_DIR`绝对路径。
+- **MD5基准**：基准文件`$MCCL_REMOTE_SRC/build/libmccl.so`的md5值（即"前置分发"里算出的那份，直接引用）与文件路径；注明这是`mccl-tester`独立核对的基准，不采信任何自报值。
+- **测试命令**：场景A、场景B两条mpirun命令的**完整展开**--`$MCCL_*`逐个替换为loader实际值（不凭记忆拼），场景B末尾带`-R 2`、场景A不带，模板见`agents/mccl-tester.md`第3节。
+
+各字段必须来自刚 `eval` 过的 loader 实际值与刚跑的 `md5sum` 输出，不得凭记忆或模板填。主控这步的md5核对只是**给用户看的预览**；`mccl-tester` 的独立核对（`agents/mccl-tester.md` 第4节）不变、仍是唯一判据。摘要输出后再进第4节调度。
+
 ## 4. 调度 mccl-tester（测试）
 
 `Task(mccl-tester)`：

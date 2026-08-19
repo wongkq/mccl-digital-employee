@@ -493,6 +493,18 @@ else
   [ "$fail29" = "1" ] || ok "mccl-tester 驱动warm reset重试规程齐（特征/间隔/次数/重试日志/hang边界）"
 fi
 
+# --- 30. 执行摘要六字段齐（/mccl-test 下发即输出 + tester 落盘 preflight 首部）---
+sum_bad=""
+for f in "$PLUGIN_ROOT/commands/mccl-test.md" "$PLUGIN_ROOT/agents/mccl-tester.md"; do
+  if [ ! -f "$f" ]; then
+    err "$f 缺失"; sum_bad="$sum_bad $(basename "$f")缺失"; continue
+  fi
+  for kw in "执行摘要" "执行时间" "前置分发" "测试规模" "产物目录" "MD5基准" "测试命令"; do
+    grep -q -- "$kw" "$f" || { err "$f 未提及 $kw（执行摘要六字段不完整）"; sum_bad="$sum_bad $(basename "$f"):$kw"; }
+  done
+done
+[ -n "$sum_bad" ] || ok "执行摘要六字段齐（mccl-test 下发即输出 + mccl-tester preflight 首部）"
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"

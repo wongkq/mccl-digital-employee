@@ -90,7 +90,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 
 ## 4. 执行前checklist
 
-跑任何mpirun之前，逐条核对，记入`test-preflight.md`（每条标注核对方式与结果）。**先写清楚本轮`$MCCL_NNODES`的值与判定的模式（OAM32/OAM64/不支持）**，再走下面的子表。
+跑任何mpirun之前，逐条核对，记入`test-preflight.md`（每条标注核对方式与结果）。**首部先写"执行摘要"六字段**：执行时间（本轮发起时刻）、前置分发（各节点`libmccl.so`的md5核对结果，来自下方第2条）、测试规模（`$MCCL_NNODES`节点 × `$MCCL_GPUS_PER_NODE`卡、`-np $MCCL_NP`、拓扑判定、`$MCCL_PERF_ARGS`实际展开值及覆盖状态）、产物目录（本轮run目录绝对路径）、MD5基准（基准文件`$MCCL_REMOTE_SRC/build/libmccl.so`的md5值与路径）、测试命令（场景A/B两条mpirun命令完整展开）。摘要字段用你本轮实际核对出的值，不用主控预览值。**随后写清楚本轮`$MCCL_NNODES`的值与判定的模式（OAM32/OAM64/不支持）**，再走下面的子表。
 
 - [ ] IP仅限`$MCCL_NODES`列表里的节点——检查本轮将要执行的所有ssh/scp/mpirun命令里出现的IP，逐个比对`$MCCL_NODES`的值，不得出现列表之外的第五个IP（或第九个，8节点时）。
 - [ ] `libmccl.so`全部节点均已更新——**独立核对md5，不采信`dev-change.md`里开发写的md5声明**。做法：经`$MCCL_NODE0_IP`跳板，对`$MCCL_NODES`里每一个节点（**含编译节点**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（宿主机层，即`$MCCL_LD_LIBRARY_PATH`的库目录部分，容器模式下不是容器内`$MCCL_VENDOR_MACA_PATH/lib`那份）分别`md5sum`，同时对`$MCCL_NODE0_IP`上（容器模式在容器内、无容器模式在宿主机）`$MCCL_REMOTE_SRC/build/libmccl.so`构建产物也`md5sum`一份作为基准，共`$MCCL_NNODES + 1`个结果必须完全一致。任何一个不一致，本条判FAIL，不得继续跑测试，直接上报——**包括编译节点那一份**：编译节点虽然是编译节点，但产物停在`build/`里，需要一次单独的分发动作才会进`$MCCL_MACA_LIB_DIR`（容器模式经`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第3节动作②的`docker exec`cp，无容器模式经合并后的直接`cp`），不能因为"库本来就是这台机器编的"就默认它已经到位。
@@ -163,7 +163,7 @@ mpirun进程**已退出**后检查该次尝试的日志，若命中以下**任�
 
 ## 7. 产出
 
-- `test-preflight.md`：第4节checklist的七条核对（含压测参数与覆盖状态记录），每条标注核对方式与结果。
+- `test-preflight.md`：首部执行摘要（六字段：执行时间/前置分发/测试规模/产物目录/MD5基准/测试命令），随后是第4节checklist的七条核对（含压测参数与覆盖状态记录），每条标注核对方式与结果。
 - `test-asymmetric.log`：场景A mpirun的完整原始输出，不摘要。
 - `test-symmetric.log`：场景B mpirun的完整原始输出，不摘要。
 - `test-asymmetric.retry-<k>.log` / `test-symmetric.retry-<k>.log`：仅当触发驱动warm reset重试（第5节）时存在，第`k`次重试的完整原始输出，同样不摘要。

@@ -343,7 +343,7 @@ bash <插件>/bin/mccl-setup-ssh
 库已编好、已分发好，想复测并直接拿到验证报告：**`/mccl-test [<run目录>]`**。这是当前主入口，测完自动出报告，不调开发、不改码/编译/分发。
 
 - `<run目录>`：可指定已有 run 目录（`.mccl-runs/<ts>` 根目录取其最新 `attempt-N/`，或直接给 `attempt-N/` 目录），不指定则新建 `.mccl-runs/<ts>/attempt-1/`。
-- 会做：`git diff` 生成 `change.patch`（作报告变更基准；工作区无改动则为空，报告标注"纯回归"）；调 `mccl-tester` 按`$MCCL_NNODES`选场景、独立核对`libmccl.so`各节点md5、跑`mpirun`、产出原始日志与`test-result.md`；再调 `mccl-reporter` 读全部产物写 `report-1.md`，`cp` 成 `final-report.md`。测完无论 PASS/FAIL 都出报告。
+- 会做：`git diff` 生成 `change.patch`（作报告变更基准；工作区无改动则为空，报告标注"纯回归"）；**下发即输出六字段执行摘要**（执行时间/前置分发/测试规模/产物目录/MD5基准/测试命令，`commands/mccl-test.md` §3.5，其中前置分发是主控的只读md5预览，判据仍是tester的独立核对）；调 `mccl-tester` 按`$MCCL_NNODES`选场景、独立核对`libmccl.so`各节点md5、跑`mpirun`、产出原始日志与`test-result.md`；再调 `mccl-reporter` 读全部产物写 `report-1.md`，`cp` 成 `final-report.md`。测完无论 PASS/FAIL 都出报告。
 - 不会做：改代码、改库、重新编译、分发、commit。
 - 产物：`test-result.md`（测试结论）+ `final-report.md`（验证报告），主控会输出两者绝对路径并一句话转述结论。
 
@@ -396,7 +396,7 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
 
 - **`test-result.md`**--测试结论（PASS/FAIL），最先看这个。
 - **`final-report.md`**--验证报告，`report-1.md` 的拷贝，每个数字标出处（文件名+行号），未覆盖场景标"未覆盖"。
-- **`test-preflight.md`**--测试没跑起来时先看这个。七条checklist（`agents/mccl-tester.md`第4节，含压测参数与override覆盖状态记录），哪条没过、怎么核对的都写在里面。
+- **`test-preflight.md`**--测试没跑起来时先看这个。首部为执行摘要（执行时间/前置分发/测试规模/产物目录/MD5基准/测试命令，tester 本轮实际核对值），随后是七条checklist（`agents/mccl-tester.md`第4节，含压测参数与override覆盖状态记录），哪条没过、怎么核对的都写在里面。
 - **`test-*.log`**--原始日志，完整输出不摘要不裁剪。
 - **`[test-anomaly.md]`**--仅异常时出现，记录 hang/SegFault 等。
 
@@ -511,7 +511,7 @@ CronCreate cron="3 23 * * *" prompt="/mccl-bench-queue submit 夜间对称内存
 |---|---|---|---|---|
 | `mccl-tester` | 有 | 能（ssh到全部节点、跑mpirun） | 按`$MCCL_NNODES`选场景跑测试、独立核对md5、产出原始日志 | 不改代码、不改库、不重新编译（`agents/mccl-tester.md`第5节） |
 | `mccl-reporter` | **无** | **不能** | 读run目录已落盘产物，写报告，每个数字标出处，未覆盖场景标"未覆盖" | 不能执行任何命令去补数据——`tools`里没有Bash，这是防报告造假的**物理隔离**，不是疏漏（`agents/mccl-reporter.md`第1节、`tests/check.sh`不变式8） |
-| 主控（`/mccl-test`） | 有限（`mkdir`/`date`/`git diff`/`cp`等） | 不直接连 | 生成`change.patch`、调度`mccl-tester`测试、调度`mccl-reporter`写报告、`cp`成`final-report.md` | 不代劳子代理的活（不改代码、不编译、不跑mpirun、不写`test-result.md`/`report-N.md`）；不自动commit（`commands/mccl-test.md`第0节） |
+| 主控（`/mccl-test`） | 有限（`mkdir`/`date`/`git diff`/`cp`/只读`md5sum`预核对（§3.5执行摘要用）等） | 不直接连 | 生成`change.patch`、下发即输出执行摘要（六字段，含各节点libmccl.so只读md5预览）、调度`mccl-tester`测试、调度`mccl-reporter`写报告、`cp`成`final-report.md` | 不代劳子代理的活（不改代码、不编译、不跑mpirun、不写`test-result.md`/`report-N.md`）；md5只做预览不代替tester独立核对；不自动commit（`commands/mccl-test.md`第0节） |
 
 ## 目录结构
 
