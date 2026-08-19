@@ -92,7 +92,7 @@ loader="$PLUGIN_ROOT/bin/mccl-env-load.py"
 if [ ! -f "$example_json" ] || [ ! -f "$loader" ]; then
   err "缺 $example_json 或 $loader，无法校验引用闭合"
 else
-  # loader --keys 对 example 跑一次，拿到全部变量名（raw 23 + derived 9）
+  # loader --keys 对 example 跑一次，拿到全部变量名（raw 24 + derived 8）
   all_keys="$(python3 "$loader" "$example_json" --keys 2>/dev/null | sort -u)"
   undef=""
   for v in $(grep -rhoE '\$\{?MCCL_[A-Z0-9_]+' "$PLUGIN_ROOT/agents/" "$PLUGIN_ROOT/commands/" "$PLUGIN_ROOT/references/" "$PLUGIN_ROOT/bin/" 2>/dev/null \

@@ -21,7 +21,6 @@
     MCCL_NNODES        = MCCL_NODES 的词数
     MCCL_NP            = MCCL_NNODES * MCCL_GPUS_PER_NODE
     MCCL_HOST_SPEC     = "ip:gpus,ip:gpus,..."
-    MCCL_MACA_LIB_DIR  = MCCL_MACA_PATH + "/lib"
     MCCL_REMOTE_SRC    = MCCL_REMOTE_WORKDIR + "/" + MCCL_REMOTE_SRC_REPO_NAME
     MCCL_LD_LIBRARY_PATH = MCCL_MACA_LIB_DIR + ":" + MCCL_OMPI_LIB_PATH
     MCCL_PERF_ARGS     = 由 9 个 MCCL_PERF_* raw 键拼出的 all_reduce_perf 参数串
@@ -47,6 +46,7 @@ REQUIRED_RAW = [
     "MCCL_SSH_OPTS",
     "MCCL_CONTAINER",
     "MCCL_MACA_PATH",
+    "MCCL_MACA_LIB_DIR",
     "MCCL_VENDOR_MACA_PATH",
     "MCCL_REMOTE_WORKDIR",
     "MCCL_LOCAL_SRC",
@@ -114,7 +114,6 @@ def derive(raw, overridden_keys):
     """从 raw 键算派生量。"""
     nodes = str(raw["MCCL_NODES"]).split()
     gpus = int(raw["MCCL_GPUS_PER_NODE"])
-    maca_lib_dir = "{}/lib".format(raw["MCCL_MACA_PATH"])
     perf_args = (
         "-b {MCCL_PERF_BEGIN} -e {MCCL_PERF_END} -f {MCCL_PERF_FACTOR} "
         "-n {MCCL_PERF_ITERS} -c {MCCL_PERF_CHECK} -w {MCCL_PERF_WARMUP} "
@@ -125,12 +124,11 @@ def derive(raw, overridden_keys):
         "MCCL_NNODES": len(nodes),
         "MCCL_NP": len(nodes) * gpus,
         "MCCL_HOST_SPEC": ",".join("{}:{}".format(ip, gpus) for ip in nodes),
-        "MCCL_MACA_LIB_DIR": maca_lib_dir,
         "MCCL_REMOTE_SRC": "{}/{}".format(
             raw["MCCL_REMOTE_WORKDIR"], raw["MCCL_REMOTE_SRC_REPO_NAME"]
         ),
         "MCCL_LD_LIBRARY_PATH": "{}:{}".format(
-            maca_lib_dir, raw["MCCL_OMPI_LIB_PATH"]
+            raw["MCCL_MACA_LIB_DIR"], raw["MCCL_OMPI_LIB_PATH"]
         ),
         "MCCL_PERF_ARGS": perf_args,
         "MCCL_PERF_OVERRIDDEN_KEYS": " ".join(sorted(overridden_keys)),
