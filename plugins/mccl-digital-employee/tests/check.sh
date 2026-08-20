@@ -478,19 +478,19 @@ else
   ok "命令 frontmatter 均含 name（Qoder/Claude Code 双端兼容）"
 fi
 
-# --- 29. mccl-tester 含驱动warm reset重试规程（特征字/15分钟间隔/5次上限/重试日志）---
+# --- 29. mccl-tester 自动重试规程齐（warm reset特征字/15分钟间隔/5次上限/重试日志/共用额度）---
 tf="$PLUGIN_ROOT/agents/mccl-tester.md"
 if [ ! -f "$tf" ]; then
   err "$tf 缺失"
 else
   fail29=0
-  for kw in "MX_EVENTTYPE_DRIVER" "mcErrorDriverWarmReset" "15分钟" "5次" "retry-" "不中断整轮"; do
-    grep -q -- "$kw" "$tf" || { err "$tf 未提及 $kw（驱动warm reset重试规程不完整）"; fail29=1; }
+  for kw in "MX_EVENTTYPE_DRIVER" "mcErrorDriverWarmReset" "15分钟" "5次" "retry-" "不中断整轮" "禁止重启远程节点"; do
+    grep -q -- "$kw" "$tf" || { err "$tf 未提及 $kw（自动重试规程不完整）"; fail29=1; }
   done
-  # 边界守卫：规程必须与hang禁令划清界限，且不得与"禁止重启"冲突
-  grep -q "唯一例外" "$tf" || { err "$tf 重试规程未声明为hang禁例外的边界"; fail29=1; }
-  grep -q "禁止重启远程节点" "$tf" || { err "$tf 重试规程未重申禁止重启"; fail29=1; }
-  [ "$fail29" = "1" ] || ok "mccl-tester 驱动warm reset重试规程齐（特征/间隔/次数/重试日志/hang边界）"
+  # 边界守卫：hang与warm reset必须共用同一份场景额度（防两条规程各自计数出现至多12次执行），
+  # 且重试不得与"禁止重启"冲突
+  grep -q "共用" "$tf" || { err "$tf 未声明hang与warm reset共用重试额度"; fail29=1; }
+  [ "$fail29" = "1" ] || ok "mccl-tester 自动重试规程齐（特征/间隔/次数/重试日志/共用额度/禁重启）"
 fi
 
 # --- 30. 执行摘要六字段齐（/mccl-test 下发即输出 + tester 落盘 preflight 首部）---
@@ -519,6 +519,25 @@ grep -q -- '--free-occupied' "$PLUGIN_ROOT/agents/mccl-prober.md" \
 grep -q -- 'V_KILLS_JSON' "$PLUGIN_ROOT/bin/mccl-gpu-probe" \
   || { err "mccl-gpu-probe 缺 kill 审计字段（occupancy.killed）"; fail31=1; }
 [ "$fail31" = "1" ] || ok "定时任务占用清理链路闭合（scheduler传参/safety例外/prober只读/kill审计）"
+
+# --- 32. hang自动重试链路闭合（tester 采证->终止->重试；safety 第3条含终止/重试例外且禁重启；
+#         README FAQ 两行同步；bench-runner 声明不沿用tester的hang重试）---
+fail32=0
+tf32="$PLUGIN_ROOT/agents/mccl-tester.md"
+for kw in "采证" "kill -15" "kill -9" "再次hang" "追加" "PID≤1"; do
+  grep -q -- "$kw" "$tf32" || { err "$tf32 未提及 $kw（hang重试规程不完整）"; fail32=1; }
+done
+for kw in "终止" "重试" "15分钟" "禁止重启远程节点"; do
+  grep -q -- "$kw" "$PLUGIN_ROOT/references/mccl-safety.md" \
+    || { err "mccl-safety.md 第3条未提及 $kw（hang终止/重试例外未受约束）"; fail32=1; }
+done
+for kw in "15分钟间隔重试" "共用同场景额度"; do
+  grep -q -- "$kw" "$REPO_ROOT/README.md" \
+    || { err "README FAQ 未提及 $kw（hang重试口径未同步）"; fail32=1; }
+done
+grep -q "不采用" "$PLUGIN_ROOT/agents/mccl-bench-runner.md" \
+  || { err "mccl-bench-runner 未声明不沿用tester的hang重试（防两套规程混淆）"; fail32=1; }
+[ "$fail32" = "1" ] || ok "hang自动重试链路闭合（tester采证终止重试/safety例外/README同步/bench边界）"
 
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"

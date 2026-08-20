@@ -55,7 +55,9 @@ $MCCL_MPIRUN --allow-run-as-root -np $MCCL_NP \
   <bin> <params>
 ```
 
-## 4. hang 处理（同 mccl-tester 第5节，禁重启）
+## 4. hang 处理（禁重启，safety 第3条）
+
+mccl-tester 第5节的 hang 自动重试（采证-->终止-->15分钟间隔重发）是 tester 场景A/B 的专属规程，bench **不采用**：bench 是采数，hang 轮直接跳过即可，重试的15分钟×5次等不起也不值得。禁重启是两条规程共用的不变量。
 
 mpirun 发起后记录时间，后台轮询。满5分钟未退出且日志无新增输出 = hang：
 - **不杀进程、不重启、不重发**
