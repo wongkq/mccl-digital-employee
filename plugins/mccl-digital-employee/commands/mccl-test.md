@@ -12,6 +12,7 @@ description: 测试+报告一条龙：调 mccl-tester 按拓扑（OAM32/OAM64）
 - 生成 `change.patch`（`git diff`，供报告引用变更基准）
 - 调 `mccl-tester` 跑测试
 - 调 `mccl-reporter` 写验证报告
+- 生成 `测试数据对比.xlsx` + `测试报告.html`（第5.5节，主控自己跑脚本，不经子代理）
 - 把结果如实转述给用户
 
 不得自己改代码、编译、分发、跑 mpirun（那些是子代理的活）；不自动 commit/push。
@@ -88,9 +89,33 @@ git diff > "$RUN_DIR/change.patch"
 cp "$RUN_DIR/report-1.md" "$RUN_DIR/final-report.md"
 ```
 
+## 5.5 生成数据对比产物（Excel + HTML）
+
+报告写完后，主控自己（不是子代理）执行一次：
+
+```bash
+python3 "$TOOLKIT_ROOT/bin/mccl-data-report.py" --run-dir "$RUN_DIR"
+```
+
+一次调用产出两份（同一份选定的日志，数字完全一致）：
+
+- `$RUN_DIR/测试数据对比.xlsx`--按《测试数据对比模版.xlsx》版式：Out-of-place/In-place 两块 × 非对称/对称内存 × 时延(us)/带宽(GB/s，busbw 口径) + 时延降低(%)/带宽提升(%)计算列。
+- `$RUN_DIR/测试报告.html`--按《测试报告模版.html》版式：Chart.js 图表（时延对比、带宽对比、时延降低%、带宽提升%）+ 数据驱动的总结段 + 公式说明。
+
+要点：
+
+- **只统计日志里实际出现的尺寸**（如本轮测 32K-32M 就只有这些行），未测试的 1K/2K 等不会出现。
+- 脚本自动选各场景**最终判定依据**的那份日志（存在 `test-*.retry-<k>.log` 时取最大 k，否则首次 `test-*.log`），并在两份产物末尾注明数据来源文件名。
+- 某场景日志缺失或某尺寸单侧缺失：对应数据留空（html 里是图表断点）、末尾写明，不推断。
+- 退出码 3（两份日志都没有可解析数据，测试根本没跑起来）不算流程异常：如实告知用户"本轮无 perf 数据，未生成对比产物"，结论仍以 `final-report.md` 为准，不要为了出表去补跑测试。
+- 其他非零退出码：把 stderr 原样转述给用户，不静默吞掉。
+- HTML 的 Chart.js 由 CDN 加载，离线环境打开时图表不渲染（数字仍在页面数据数组与总结段里）--用户问到就这么答，不是缺陷。
+
+这一步不经过 `mccl-reporter`（它无 Bash，这是物理隔离，不动）；两份产物都是对原始日志的程序化转录，每个数字可回溯到产物末尾注明的日志文件。
+
 ## 6. 收尾
 
-向用户输出 `test-result.md` 与 `final-report.md` 的**绝对路径**，并一句话转述报告结论（PASS/FAIL + 关键原因）。若 `mccl-perf-override.json` 存在（本轮有活跃覆盖），额外打印一行覆盖清单（如"本轮使用了参数覆盖：MCCL_PERF_BEGIN=16K；说'清除覆盖'可恢复默认"）。提示用户：本命令只测试+出报告，不 commit；是否 commit 由人工确认后自行执行。
+向用户输出 `test-result.md`、`final-report.md`、`测试数据对比.xlsx` 与 `测试报告.html`（若生成成功）的**绝对路径**，并一句话转述报告结论（PASS/FAIL + 关键原因）。若 `mccl-perf-override.json` 存在（本轮有活跃覆盖），额外打印一行覆盖清单（如"本轮使用了参数覆盖：MCCL_PERF_BEGIN=16K；说'清除覆盖'可恢复默认"）。提示用户：本命令只测试+出报告，不 commit；是否 commit 由人工确认后自行执行。
 
 ## 7. 不做的事
 

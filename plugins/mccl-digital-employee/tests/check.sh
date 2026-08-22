@@ -539,6 +539,33 @@ grep -q "不采用" "$PLUGIN_ROOT/agents/mccl-bench-runner.md" \
   || { err "mccl-bench-runner 未声明不沿用tester的hang重试（防两套规程混淆）"; fail32=1; }
 [ "$fail32" = "1" ] || ok "hang自动重试链路闭合（tester采证终止重试/safety例外/README同步/bench边界）"
 
+# --- 33. 数据对比产物生成器（xlsx+html）存在可用，且不经 reporter（无Bash隔离不动）---
+xlsx_stats="$PLUGIN_ROOT/bin/mccl-data-report.py"
+fail33=0
+if [ ! -f "$xlsx_stats" ]; then
+  err "$xlsx_stats 缺失"; fail33=1
+elif [ ! -x "$xlsx_stats" ]; then
+  err "$xlsx_stats 不可执行"; fail33=1
+else
+  help_out=$("$xlsx_stats" --help 2>&1); help_rc=$?
+  [ "$help_rc" -eq 0 ] || { err "$xlsx_stats --help 退出码非 0 ($help_rc)"; fail33=1; }
+  for kw in --run-dir --asym --sym --out --html-out; do
+    echo "$help_out" | grep -q -- "$kw" || { err "$xlsx_stats --help 未提及 $kw"; fail33=1; }
+  done
+  # 不引用 MCCL_ 环境变量（保持不变式7的 env 引用闭合；日志路径由调用方传参）
+  if grep -qE '\$\{?MCCL_[A-Z0-9_]+' "$xlsx_stats"; then
+    err "$xlsx_stats 引用了 MCCL_ 环境变量（应纯参数传入）"; fail33=1
+  fi
+  # /mccl-test 编排里必须有生成数据对比产物的步骤，且两份产物路径都落在 run 目录
+  grep -q "mccl-data-report.py" "$PLUGIN_ROOT/commands/mccl-test.md" \
+    || { err "commands/mccl-test.md 未接入 mccl-data-report.py"; fail33=1; }
+  grep -q "测试数据对比.xlsx" "$PLUGIN_ROOT/commands/mccl-test.md" \
+    || { err "commands/mccl-test.md 未写明产物 测试数据对比.xlsx"; fail33=1; }
+  grep -q "测试报告.html" "$PLUGIN_ROOT/commands/mccl-test.md" \
+    || { err "commands/mccl-test.md 未写明产物 测试报告.html"; fail33=1; }
+fi
+[ "$fail33" = "1" ] || ok "数据对比产物生成器可用（xlsx+html、--run-dir/--asym/--sym/--out/--html-out、无MCCL_依赖、已接入/mccl-test）"
+
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"
 exit "$fail"

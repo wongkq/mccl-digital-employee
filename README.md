@@ -195,7 +195,7 @@ cp $SRC/mccl-env.json.example  ./mccl-env.json
 bash <插件根>/tests/check.sh
 ```
 
-这份`tests/check.sh`本身也可以整份拷进真实仓库长期留用，作为每次改动agent定义/references后的静态自检。
+这份`tests/check.sh`本身也可以整份拷进真实仓库长期留用，作为每次改动agent定义/references后的静态自检（不变式33守护数据对比产物生成器的存在与`/mccl-test`接线）。另有两个独立单测：`tests/test-bench-stats.sh`（bench聚合纯函数）、`tests/test-data-report.sh`（数据对比产物生成器：实测尺寸过滤、重试日志选择、缺场景留空、无数据不产文件、xlsx与html数字一致），改到对应`bin/`脚本后各跑一次。
 
 ## 更新插件
 
@@ -343,9 +343,9 @@ bash <插件>/bin/mccl-setup-ssh
 库已编好、已分发好，想复测并直接拿到验证报告：**`/mccl-test [<run目录>]`**。这是当前主入口，测完自动出报告，不调开发、不改码/编译/分发。
 
 - `<run目录>`：可指定已有 run 目录（`.mccl-runs/<ts>` 根目录取其最新 `attempt-N/`，或直接给 `attempt-N/` 目录），不指定则新建 `.mccl-runs/<ts>/attempt-1/`。
-- 会做：`git diff` 生成 `change.patch`（作报告变更基准；工作区无改动则为空，报告标注"纯回归"）；**下发即输出六字段执行摘要**（执行时间/前置分发/测试规模/产物目录/MD5基准/测试命令，`commands/mccl-test.md` §3.5，其中前置分发是主控的只读md5预览，判据仍是tester的独立核对）；调 `mccl-tester` 按`$MCCL_NNODES`选场景、独立核对`libmccl.so`各节点md5、跑`mpirun`、产出原始日志与`test-result.md`；再调 `mccl-reporter` 读全部产物写 `report-1.md`，`cp` 成 `final-report.md`。测完无论 PASS/FAIL 都出报告。
+- 会做：`git diff` 生成 `change.patch`（作报告变更基准；工作区无改动则为空，报告标注"纯回归"）；**下发即输出六字段执行摘要**（执行时间/前置分发/测试规模/产物目录/MD5基准/测试命令，`commands/mccl-test.md` §3.5，其中前置分发是主控的只读md5预览，判据仍是tester的独立核对）；调 `mccl-tester` 按`$MCCL_NNODES`选场景、独立核对`libmccl.so`各节点md5、跑`mpirun`、产出原始日志与`test-result.md`；再调 `mccl-reporter` 读全部产物写 `report-1.md`，`cp` 成 `final-report.md`；最后主控跑 `bin/mccl-data-report.py` 一次生成 `测试数据对比.xlsx` + `测试报告.html`（§5.5，分别按《测试数据对比模版.xlsx》与《测试报告模版.html》版式统计 Out-of-place/In-place × 非对称/对称内存的时延与带宽及提升百分比，**只含实际测试的尺寸**）。测完无论 PASS/FAIL 都出报告（perf 数据全缺时不生成对比产物、如实告知，结论仍以报告为准）。
 - 不会做：改代码、改库、重新编译、分发、commit。
-- 产物：`test-result.md`（测试结论）+ `final-report.md`（验证报告），主控会输出两者绝对路径并一句话转述结论。
+- 产物：`test-result.md`（测试结论）+ `final-report.md`（验证报告）+ `测试数据对比.xlsx`（数据对比表）+ `测试报告.html`（图表报告），主控会输出绝对路径并一句话转述结论。
 
 若只想测、不要报告，可跳过 `/mccl-test` 直接手动调 `mccl-tester`（提示词必须给绝对路径的 run 目录——子代理继承主会话CWD，给相对路径会写到别处去）。示例：
 
@@ -386,6 +386,8 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
     ├── [test-*.retry-<k>.log]       # 仅驱动warm reset重试时出现，第k次重试的原始日志
     ├── test-result.md               # 测试结论（PASS/FAIL）
     ├── [test-anomaly.md]            # 仅异常时出现
+    ├── 测试数据对比.xlsx             # Excel数据对比表（mccl-data-report.py 生成，仅实际测试的尺寸）
+    ├── 测试报告.html                # HTML图表报告（同脚本生成，Chart.js 四图+总结段）
     ├── report-1.md                  # 验证报告（mccl-reporter 产出）
     └── final-report.md              # report-1.md 的拷贝，最终报告
 ```
@@ -396,6 +398,8 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
 
 - **`test-result.md`**--测试结论（PASS/FAIL），最先看这个。
 - **`final-report.md`**--验证报告，`report-1.md` 的拷贝，每个数字标出处（文件名+行号），未覆盖场景标"未覆盖"。
+- **`测试数据对比.xlsx`**--按《测试数据对比模版.xlsx》版式的数据对比表：Out-of-place（输出）/In-place（输入）两块 × 非对称/对称内存的时延(us)与带宽(GB/s，busbw口径)，加时延降低(%)/带宽提升(%)计算列（正数绿底、负数粉底、0无底色，复刻模板配色）。**只统计日志里实际出现的尺寸**（如本轮测 32K-32M 就只有这些行，未测试的 1K/2K 不会出现）；某场景缺失或某尺寸单侧缺失时对应单元格留空并在表尾注明；表尾"数据来源"注明每个场景取的是哪份日志（有重试时取最大 `retry-<k>` 那份，即最终判定的依据）。生成器是纯标准库脚本 `bin/mccl-data-report.py`（不依赖 openpyxl），一次调用同时产出 xlsx 与 html，也可手动跑：`python3 <插件>/bin/mccl-data-report.py --run-dir <run目录>` 或 `--asym <日志> --sym <日志> --out <xlsx> [--html-out <html>]`。
+- **`测试报告.html`**--按《测试报告模版.html》版式的图表报告：Out-of-place 模式下对称 vs 非对称内存的时延对比、带宽对比（绝对值双图）与时延降低(%)/带宽提升(%)（提升幅度双图），共四张 Chart.js 图表，加一段由实际数据驱动的文字总结（对比档数、哪个场景更优及极值，缺数据时如实说明而不是编造结论）。数字与 xlsx 完全一致（同一脚本同一次计算）。同样**只含实际测试的尺寸**，某侧缺失的点位图表自动断开；页内"数据来源"注明各场景取的日志（含重试时取最大 `retry-<k>`）。注意图表依赖 CDN 加载 Chart.js，离线环境打开时图表区为空但表格数据仍在。
 - **`test-preflight.md`**--测试没跑起来时先看这个。首部为执行摘要（执行时间/前置分发/测试规模/产物目录/MD5基准/测试命令，tester 本轮实际核对值），随后是七条checklist（`agents/mccl-tester.md`第4节，含压测参数与override覆盖状态记录），哪条没过、怎么核对的都写在里面。
 - **`test-*.log`**--原始日志，完整输出不摘要不裁剪。
 - **`[test-anomaly.md]`**--仅异常时出现，记录 hang/SegFault 等。
