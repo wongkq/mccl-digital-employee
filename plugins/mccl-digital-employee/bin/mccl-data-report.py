@@ -17,7 +17,8 @@
 - 带宽提升(%) = (对称带宽 - 非对称带宽) / 非对称带宽 × 100
 - Excel：正数绿底(FFC6EFCE)、负数粉底(FFFFC7CE)、0 无底色（模板 s5/s6/s7 的
   背景填充色做法）；表头蓝底白字加粗。
-- HTML 总结段从数据推导生成（档数、更优/更差计数、极值及其尺寸），不编造叙述；
+- HTML 总结段从数据推导生成（数据范围、更优/更差的具体数据尺寸、极值及其尺寸），
+  不编造叙述；全程不用"档"的概念，一律以实际数据尺寸（范围）说明；
   某场景缺失时如实写"对比未覆盖"。
 - 纯标准库（zipfile + 手写 SpreadsheetML），不依赖 openpyxl--目标机器不一定装了它。
 - 本脚本不引用任何 MCCL_* 环境变量（日志路径由调用方给定），保持 env 引用闭合。
@@ -282,7 +283,7 @@ def pct_style(v):
 
 
 def compute_rows(asym, sym):
-    """两场景日志实际尺寸的并集（升序），逐档计算两模式的所有数值。
+    """两场景日志实际尺寸的并集（升序），逐尺寸计算两模式的所有数值。
 
     xlsx 与 html 两份产物共用这一份计算，保证同一次调用产出的数字完全一致。
     返回 [(size, label, {mode: (a_lat, s_lat, lat_pct, a_bw, s_bw, bw_pct)})]，
@@ -353,14 +354,15 @@ def build_sheet(asym, sym, asym_src, sym_src):
 
     # ---- 说明区（复刻模板行23-27 + 数据来源）----
     row += 1  # 隔一空行
+    size_span = '%s~%s' % (rows[0][1], rows[-1][1]) if rows else '无'
     notes = [
         '计算公式说明：',
         '时延降低(%) = (非对称内存时延 - 对称内存时延) / 非对称内存时延 × 100%',
         '带宽提升(%) = (对称内存带宽 - 非对称内存带宽) / 非对称内存带宽 × 100%',
         '说明：正数(绿色)表示 对称内存 比 非对称内存 性能更好，负数(红色)表示更差',
         '      输出 = Out-of-place模式，输入 = In-place模式',
-        '数据来源：非对称内存=%s；对称内存=%s。仅统计实际测试的尺寸（共%d档），未测试的尺寸不列。' % (
-            asym_src or '缺失', sym_src or '缺失', len(rows)),
+        '数据来源：非对称内存=%s；对称内存=%s。仅统计实际测试的数据尺寸（%s，共%d个），未测试的尺寸不列。' % (
+            asym_src or '缺失', sym_src or '缺失', size_span, len(rows)),
     ]
     if asym is None:
         notes.append('场景A（非对称内存）日志缺失（未跑或未留产物），对应列留空。')
@@ -562,6 +564,26 @@ def _fmt2(v):
     return ('%.2f' % round(v, 2)).rstrip('0').rstrip('.') if isinstance(v, float) else str(v)
 
 
+def _size_desc(items, pred, full_labels=None):
+    """按尺寸升序的 [(label, value)] 中命中 pred 的尺寸 -> 实际数据范围描述。
+
+    命中尺寸连续时写"首~尾"范围，不连续时逐个列出（如"32KB、1MB~16MB"）；
+    一个命中只写该尺寸本身；无命中返回 None。不用"档"的概念，一律用实际数据尺寸。
+    连续性以 full_labels（默认 items 自身的标签序，即全部实测尺寸的升序）为准，
+    中间夹着未参与判定的尺寸时不算连续，逐个列出以免范围表述失真。
+    """
+    hit = [l for l, v in items if pred(v)]
+    if not hit:
+        return None
+    if len(hit) == 1:
+        return hit[0]
+    all_labels = full_labels if full_labels is not None else [l for l, _v in items]
+    idx = [all_labels.index(l) for l in hit]
+    if idx == list(range(idx[0], idx[0] + len(idx))):
+        return '%s~%s' % (hit[0], hit[-1])
+    return '、'.join(hit)
+
+
 def build_summary(rows, asym, sym):
     """总结段：从数据推导，不编造叙述。rows 是 compute_rows 的结果。"""
     if not rows:
@@ -570,12 +592,12 @@ def build_summary(rows, asym, sym):
     n = len(rows)
     if sym is None:
         return ('场景B（对称内存）日志缺失（未跑或未留产物），本轮无对比数据。'
-                '报告仅呈现非对称内存侧实测数值（%s~%s 共%d档），图表中"对称内存"系列无数据点，'
-                '性能对比结论以补齐场景B数据后的报告为准。' % (first, last, n))
+                '报告仅呈现非对称内存侧实测数值（%s~%s），图表中"对称内存"系列无数据点，'
+                '性能对比结论以补齐场景B数据后的报告为准。' % (first, last))
     if asym is None:
         return ('场景A（非对称内存）日志缺失（未跑或未留产物），本轮无对比数据。'
-                '报告仅呈现对称内存侧实测数值（%s~%s 共%d档），图表中"非对称内存"系列无数据点，'
-                '性能对比结论以补齐场景A数据后的报告为准。' % (first, last, n))
+                '报告仅呈现对称内存侧实测数值（%s~%s），图表中"非对称内存"系列无数据点，'
+                '性能对比结论以补齐场景A数据后的报告为准。' % (first, last))
     # 两场景都有：按 Out-of-place 模式统计（与模板叙述口径一致）
     lat = [(label, e['oop'][2]) for _s, label, e in rows if e['oop'][2] is not None]
     bw = [(label, e['oop'][5]) for _s, label, e in rows if e['oop'][5] is not None]
@@ -584,24 +606,43 @@ def build_summary(rows, asym, sym):
         parts.append('两场景日志的尺寸范围没有交集，无法对比（各侧数据见下方图表与数据数组）。')
         return ''.join(parts)
     m = len(lat)
-    lat_better = sum(1 for _l, v in lat if v > 0)
-    lat_worse = sum(1 for _l, v in lat if v < 0)
-    bw_better = sum(1 for _l, v in bw if v > 0)
-    bw_worse = sum(1 for _l, v in bw if v < 0)
+    all_labels = [label for _s, label, _e in rows]   # 全部实测尺寸（升序），连续性按它判
+    lat_lower = _size_desc(lat, lambda v: v > 0, all_labels)
+    lat_higher = _size_desc(lat, lambda v: v < 0, all_labels)
+    bw_higher = _size_desc(bw, lambda v: v > 0, all_labels) if bw else None
+    bw_lower = _size_desc(bw, lambda v: v < 0, all_labels) if bw else None
     best_lat = max(lat, key=lambda t: t[1])
     worst_lat = min(lat, key=lambda t: t[1])
     best_bw = max(bw, key=lambda t: t[1]) if bw else None
     worst_bw = min(bw, key=lambda t: t[1]) if bw else None
-    parts.append('本报告对比了Out-of-place模式下对称内存与非对称内存在<strong>%s~%s</strong>共%d档数据块下的时延与带宽表现。'
-                 % (first, last, n))
+    parts.append('本报告对比了Out-of-place模式下对称内存与非对称内存在<strong>%s~%s</strong>数据尺寸下的时延与带宽表现。'
+                 % (first, last))
     if m < n:
-        parts.append('其中%d档两侧数据齐全可对比，其余%d档单侧缺失未参与对比。' % (m, n - m))
-    parts.append('时延方面：%d/%d档尺寸对称内存更低、%d档更高；时延降低最显著为<strong>%s%%（%s）</strong>，'
-                 '最差为%s%%（%s）。' % (lat_better, m, lat_worse, _fmt2(best_lat[1]), best_lat[0],
+        comparable = _size_desc([(label, 1 if e['oop'][2] is not None else 0)
+                                 for _s, label, e in rows], lambda v: v == 1)
+        one_sided = _size_desc([(label, 1 if e['oop'][2] is not None else 0)
+                                for _s, label, e in rows], lambda v: v == 0)
+        parts.append('其中%s数据两侧齐全可对比，%s数据单侧缺失未参与对比。' % (comparable, one_sided))
+    lat_clauses = []
+    if lat_lower:
+        lat_clauses.append('%s数据对称内存更低' % lat_lower)
+    if lat_higher:
+        lat_clauses.append('%s数据对称内存更高' % lat_higher)
+    if not lat_clauses:
+        lat_clauses.append('各数据尺寸两侧时延持平')
+    parts.append('时延方面：%s；时延降低最显著为<strong>%s%%（%s）</strong>，'
+                 '最差为%s%%（%s）。' % ('、'.join(lat_clauses), _fmt2(best_lat[1]), best_lat[0],
                                         _fmt2(worst_lat[1]), worst_lat[0]))
     if best_bw:
-        parts.append('带宽方面：%d/%d档尺寸对称内存更高、%d档更低；带宽提升最大为<strong>%s%%（%s）</strong>，'
-                     '最低为%s%%（%s）。' % (bw_better, m, bw_worse, _fmt2(best_bw[1]), best_bw[0],
+        bw_clauses = []
+        if bw_higher:
+            bw_clauses.append('%s数据对称内存更高' % bw_higher)
+        if bw_lower:
+            bw_clauses.append('%s数据对称内存更低' % bw_lower)
+        if not bw_clauses:
+            bw_clauses.append('各数据尺寸两侧带宽持平')
+        parts.append('带宽方面：%s；带宽提升最大为<strong>%s%%（%s）</strong>，'
+                     '最低为%s%%（%s）。' % ('、'.join(bw_clauses), _fmt2(best_bw[1]), best_bw[0],
                                             _fmt2(worst_bw[1]), worst_bw[0]))
     last_entry = rows[-1][2]['oop']
     if last_entry[2] is not None:
@@ -627,8 +668,9 @@ def build_html(asym, sym, asym_src, sym_src):
                     _r2(oop_at), _r2(oop_st), _r2(oop_lat), _r2(oop_ab), _r2(oop_sb), _r2(oop_bw),
                     _r2(ip_at), _r2(ip_st), _r2(ip_lat), _r2(ip_ab), _r2(ip_sb), _r2(ip_bw)])
 
-    source_notes = ['数据来源：非对称内存=%s；对称内存=%s。仅统计实际测试的尺寸（共%d档），未测试的尺寸不列。'
-                    % (escape(asym_src or '缺失'), escape(sym_src or '缺失'), len(rows))]
+    size_span = '%s~%s' % (first, last) if rows else '无'
+    source_notes = ['数据来源：非对称内存=%s；对称内存=%s。仅统计实际测试的数据尺寸（%s，共%d个），未测试的尺寸不列。'
+                    % (escape(asym_src or '缺失'), escape(sym_src or '缺失'), size_span, len(rows))]
     if asym is None:
         source_notes.append('场景A（非对称内存）日志缺失（未跑或未留产物），对应数据为空。')
     if sym is None:
@@ -722,7 +764,11 @@ def main(argv=None):
     print('已生成：%s' % args.html_out)
     print('  非对称内存来源：%s' % (asym_src or '缺失'))
     print('  对称内存来源：%s' % (sym_src or '缺失'))
-    print('  尺寸档数：%d' % len(set(asym or {}) | set(sym or {})))
+    sizes = set(asym or {}) | set(sym or {})
+    if sizes:
+        print('  数据尺寸：%s~%s 共%d个' % (size_label(min(sizes)), size_label(max(sizes)), len(sizes)))
+    else:
+        print('  数据尺寸：无')
     return 0
 
 

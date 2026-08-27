@@ -98,7 +98,7 @@ PY
 }
 
 # =====================================================================
-# --- 1. 双场景（32K-16M 共10档）：生成成功、只含实测尺寸、数值正确 ---
+# --- 1. 双场景（32K/64K/16M）：生成成功、只含实测尺寸、数值正确 ---
 # =====================================================================
 mkdir -p "$TMP/run1"
 mklog "$TMP/run1/test-asymmetric.log" \
@@ -140,7 +140,7 @@ HTXT=$(html_text "$HTML")
 assert_contains "用例1 html副标题实际范围" "$HTXT" "数据大小 32KB ~ 16MB"
 assert_not_contains "用例1 html不含1KB（未测试）" "$HTXT" '"1KB"'
 assert_not_contains "用例1 html不含32MB（未测试）" "$HTXT" '"32MB"'
-assert_eq "用例1 html raw行数=实测档数" "3" "$(raw_json "$HTML" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')"
+assert_eq "用例1 html raw行数=实测尺寸数" "3" "$(raw_json "$HTML" | python3 -c 'import json,sys;print(len(json.load(sys.stdin)))')"
 assert_eq "用例1 html raw[0]标签" "32KB" "$(raw_cell "$HTML" 0 0)"
 assert_eq "用例1 html raw[0] asym时延(oop)" "45.99" "$(raw_cell "$HTML" 0 1)"
 assert_eq "用例1 html raw[0] sym时延(oop)" "45.5" "$(raw_cell "$HTML" 0 2)"
@@ -150,7 +150,8 @@ assert_contains "用例1 html公式-非对称内存带宽" "$HTXT" "/ 非对称�
 assert_not_contains "用例1 html公式-不含FC带宽" "$HTXT" "FC带宽"
 assert_contains "用例1 html来源注记asym" "$HTXT" "数据来源：非对称内存=test-asymmetric.log"
 assert_contains "用例1 html来源注记sym" "$HTXT" "对称内存=test-symmetric.log"
-assert_contains "用例1 html总结段-档数" "$HTXT" "共3档"
+assert_contains "用例1 html总结段-数据范围" "$HTXT" "<strong>32KB~16MB</strong>数据尺寸下"
+assert_not_contains "用例1 html不含档字" "$HTXT" "档"
 
 # =====================================================================
 # --- 2. run-dir 重试选择：有 retry-<k> 取最大 k ---
@@ -283,15 +284,15 @@ for kw in 'canvas id="latencyChart"' 'canvas id="bwChart"' 'canvas id="latPctCha
           '时延降低百分比' '带宽提升百分比'; do
   assert_contains "用例7 html含模板元素[$kw]" "$HT7" "$kw"
 done
-# 总结段数字正确性：run1 的 3 档（32K/64K/16M），OOP时延 sym 全更低（3/3），
+# 总结段数字正确性：run1 的 3 个尺寸（32K/64K/16M），OOP时延 sym 全更低，
 # 时延降低最显著 64KB=1.69%，最差 16MB=0.46%（(371.72-370)/371.72*100=0.4627→0.46）
-assert_contains "用例7 总结-时延更优计数" "$HT7" "3/3档尺寸对称内存更低"
+assert_contains "用例7 总结-时延更低的数据范围" "$HT7" "32KB~16MB数据对称内存更低"
 assert_contains "用例7 总结-时延降低最显著" "$HT7" "1.69%（64KB）"
 assert_contains "用例7 总结-时延降低最差" "$HT7" "0.46%（16MB）"
-# 尺寸不对齐场景（用例4）：总结段须写明单侧缺失档数（3档中仅1档可比）
+# 尺寸不对齐场景（用例4）：总结段须写明可对比/缺失的具体尺寸（2个尺寸中仅1MB可比）
 HT4=$(html_text "$TMP/run4/测试报告.html")
-assert_contains "用例7 总结-单侧缺失说明" "$HT4" "1档两侧数据齐全可对比"
-assert_contains "用例7 总结-其余缺失" "$HT4" "其余1档单侧缺失未参与对比"
+assert_contains "用例7 总结-单侧缺失说明" "$HT4" "1MB数据两侧齐全可对比"
+assert_contains "用例7 总结-其余缺失" "$HT4" "32KB数据单侧缺失未参与对比"
 
 # =====================================================================
 echo
