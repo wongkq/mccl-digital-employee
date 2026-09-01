@@ -549,7 +549,7 @@ elif [ ! -x "$xlsx_stats" ]; then
 else
   help_out=$("$xlsx_stats" --help 2>&1); help_rc=$?
   [ "$help_rc" -eq 0 ] || { err "$xlsx_stats --help 退出码非 0 ($help_rc)"; fail33=1; }
-  for kw in --run-dir --asym --sym --out --html-out; do
+  for kw in --run-dir --asym --sym --out --html-out --goals; do
     echo "$help_out" | grep -q -- "$kw" || { err "$xlsx_stats --help 未提及 $kw"; fail33=1; }
   done
   # 不引用 MCCL_ 环境变量（保持不变式7的 env 引用闭合；日志路径由调用方传参）
@@ -564,7 +564,7 @@ else
   grep -q "测试报告.html" "$PLUGIN_ROOT/commands/mccl-test.md" \
     || { err "commands/mccl-test.md 未写明产物 测试报告.html"; fail33=1; }
 fi
-[ "$fail33" = "1" ] || ok "数据对比产物生成器可用（xlsx+html、--run-dir/--asym/--sym/--out/--html-out、无MCCL_依赖、已接入/mccl-test）"
+[ "$fail33" = "1" ] || ok "数据对比产物生成器可用（xlsx+html、--run-dir/--asym/--sym/--out/--html-out/--goals、无MCCL_依赖、已接入/mccl-test）"
 
 echo
 [ "$fail" -eq 0 ] && echo "全部通过" || echo "有失败项"

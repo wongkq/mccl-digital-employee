@@ -295,6 +295,60 @@ assert_contains "用例7 总结-单侧缺失说明" "$HT4" "1MB数据两侧齐�
 assert_contains "用例7 总结-其余缺失" "$HT4" "32KB数据单侧缺失未参与对比"
 
 # =====================================================================
+# --- 8. --goals 性能达标判定（用例8a PASS / 8b FAIL / 8c 尺寸缺失） ---
+# 目标尺寸 4MB/8MB/16MB/32MB；asym 时延固定 100us，sym 时延=100-p 使
+#  时延降低% = (100-sym)/100*100 = p，正好等于基线 → 误差 0 → PASS。
+# 判据：|实测% - 基准%| ≤ tolerance(3) 尺寸 PASS，否则 FAIL；任一 FAIL 即整轮 FAIL。
+# =====================================================================
+goals_json="$TMP/goals.json"
+cat > "$goals_json" <<'JSON'
+{"collective":"allreduce","mode":"oop","tolerance":3,
+ "baselines":{"4MB":6,"8MB":18,"16MB":24,"32MB":8}}
+JSON
+# write_pair <dir> <size_bytes> <sym_us>：向 run 目录写一对场景日志，asym=100，sym=<sym_us>
+write_pair() { # <dir> <size_bytes> <sym_us>
+  local dir="$1" size="$2" symus="$3" row
+  row='%13d %13d     float     sum      -1 %8s %7s %7s %7d %8s %7s %7s %7d\n'
+  printf "$row" "$size" $((size/4)) 100 1.0 2.0 0 100 1.0 2.0 0 >> "$dir/test-asymmetric.log"
+  printf "$row" "$size" $((size/4)) "$symus" 1.0 2.0 0 "$symus" 1.0 2.0 0 >> "$dir/test-symmetric.log"
+}
+# 用例8a PASS：sym = 94/82/76/92 → lat%(oop) = 6/18/24/8，都等于基线，误差0
+mkdir -p "$TMP/run8a"
+write_pair "$TMP/run8a" 4194304 94
+write_pair "$TMP/run8a" 8388608 82
+write_pair "$TMP/run8a" 16777216 76
+write_pair "$TMP/run8a" 33554432 92
+python3 "$STATS" --run-dir "$TMP/run8a" --goals "$goals_json" > "$TMP/run8a.out" 2>&1
+OUT8A=$(cat "$TMP/run8a.out")
+assert_eq "用例8a 退出码0" "0" "$?"
+assert_contains "用例8a 判定PASS" "$OUT8A" "判定：PASS"
+assert_contains "用例8a 落盘性能判定.txt" "$(cat "$TMP/run8a/性能判定.txt")" "判定：PASS"
+assert_not_contains "用例8a 无FAIL" "$OUT8A" "FAIL"
+
+# 用例8b FAIL：16MB（baseline 24）sym=71 → lat%=(100-71)=29，误差 +5 >3 → FAIL
+mkdir -p "$TMP/run8b"
+write_pair "$TMP/run8b" 4194304 94
+write_pair "$TMP/run8b" 8388608 82
+write_pair "$TMP/run8b" 16777216 71
+write_pair "$TMP/run8b" 33554432 92
+python3 "$STATS" --run-dir "$TMP/run8b" --goals "$goals_json" > "$TMP/run8b.out" 2>&1
+OUT8B=$(cat "$TMP/run8b.out")
+assert_eq "用例8b 退出码0" "0" "$?"
+assert_contains "用例8b 判定FAIL" "$OUT8B" "判定：FAIL"
+assert_contains "用例8b 16MB标FAIL" "$OUT8B" "16MB"
+
+# 用例8c 尺寸缺失：目标 16MB/32MB 未实测 → 计 FAIL（数据缺失，无法判定）
+mkdir -p "$TMP/run8c"
+write_pair "$TMP/run8c" 4194304 94
+write_pair "$TMP/run8c" 8388608 82
+python3 "$STATS" --run-dir "$TMP/run8c" --goals "$goals_json" > "$TMP/run8c.out" 2>&1
+OUT8C=$(cat "$TMP/run8c.out")
+assert_eq "用例8c 退出码0" "0" "$?"
+assert_contains "用例8c 缺失尺寸判定FAIL" "$OUT8C" "判定：FAIL"
+assert_contains "用例8c 缺失尺寸-16MB注记" "$OUT8C" "16MB"
+assert_contains "用例8c 缺失尺寸-32MB注记" "$OUT8C" "32MB"
+
+# =====================================================================
 echo
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

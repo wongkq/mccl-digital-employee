@@ -345,7 +345,7 @@ bash <插件>/bin/mccl-setup-ssh
 - `<run目录>`：可指定已有 run 目录（`.mccl-runs/<ts>` 根目录取其最新 `attempt-N/`，或直接给 `attempt-N/` 目录），不指定则新建 `.mccl-runs/<ts>/attempt-1/`。
 - 会做：`git diff` 生成 `change.patch`（作报告变更基准；工作区无改动则为空，报告标注"纯回归"）；**下发即输出六字段执行摘要**（执行时间/前置分发/测试规模/产物目录/MD5基准/测试命令，`commands/mccl-test.md` §3.5，其中前置分发是主控的只读md5预览，判据仍是tester的独立核对）；调 `mccl-tester` 按`$MCCL_NNODES`选场景、独立核对`libmccl.so`各节点md5、跑`mpirun`、产出原始日志与`test-result.md`；再调 `mccl-reporter` 读全部产物写 `report-1.md`，`cp` 成 `final-report.md`；最后主控跑 `bin/mccl-data-report.py` 一次生成 `测试数据对比.xlsx` + `测试报告.html`（§5.5，分别按《测试数据对比模版.xlsx》与《测试报告模版.html》版式统计 Out-of-place/In-place × 非对称/对称内存的时延与带宽及提升百分比，**只含实际测试的尺寸**）。测完无论 PASS/FAIL 都出报告（perf 数据全缺时不生成对比产物、如实告知，结论仍以报告为准）。
 - 不会做：改代码、改库、重新编译、分发、commit。
-- 产物：`test-result.md`（测试结论）+ `final-report.md`（验证报告）+ `测试数据对比.xlsx`（数据对比表）+ `测试报告.html`（图表报告），主控会输出绝对路径并一句话转述结论。
+- 产物：`test-result.md`（测试结论）+ `final-report.md`（验证报告）+ `测试数据对比.xlsx`（数据对比表）+ `测试报告.html`（图表报告），主控会输出绝对路径并一句话转述结论；若本轮给了 `--goals` 性能基准，另有 `性能判定.txt`（性能达标 P/F）。
 
 若只想测、不要报告，可跳过 `/mccl-test` 直接手动调 `mccl-tester`（提示词必须给绝对路径的 run 目录——子代理继承主会话CWD，给相对路径会写到别处去）。示例：
 
@@ -398,7 +398,7 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
 
 - **`test-result.md`**--测试结论（PASS/FAIL），最先看这个。
 - **`final-report.md`**--验证报告，`report-1.md` 的拷贝，每个数字标出处（文件名+行号），未覆盖场景标"未覆盖"。
-- **`测试数据对比.xlsx`**--按《测试数据对比模版.xlsx》版式的数据对比表：Out-of-place（输出）/In-place（输入）两块 × 非对称/对称内存的时延(us)与带宽(GB/s，busbw口径)，加时延降低(%)/带宽提升(%)计算列（正数绿底、负数粉底、0无底色，复刻模板配色）。**只统计日志里实际出现的尺寸**（如本轮测 32K-32M 就只有这些行，未测试的 1K/2K 不会出现）；某场景缺失或某尺寸单侧缺失时对应单元格留空并在表尾注明；表尾"数据来源"注明每个场景取的是哪份日志（有重试时取最大 `retry-<k>` 那份，即最终判定的依据）。生成器是纯标准库脚本 `bin/mccl-data-report.py`（不依赖 openpyxl），一次调用同时产出 xlsx 与 html，也可手动跑：`python3 <插件>/bin/mccl-data-report.py --run-dir <run目录>` 或 `--asym <日志> --sym <日志> --out <xlsx> [--html-out <html>]`。
+- **`测试数据对比.xlsx`**--按《测试数据对比模版.xlsx》版式的数据对比表：Out-of-place（输出）/In-place（输入）两块 × 非对称/对称内存的时延(us)与带宽(GB/s，busbw口径)，加时延降低(%)/带宽提升(%)计算列（正数绿底、负数粉底、0无底色，复刻模板配色）。**只统计日志里实际出现的尺寸**（如本轮测 32K-32M 就只有这些行，未测试的 1K/2K 不会出现）；某场景缺失或某尺寸单侧缺失时对应单元格留空并在表尾注明；表尾"数据来源"注明每个场景取的是哪份日志（有重试时取最大 `retry-<k>` 那份，即最终判定的依据）。生成器是纯标准库脚本 `bin/mccl-data-report.py`（不依赖 openpyxl），一次调用同时产出 xlsx 与 html，也可手动跑：`python3 <插件>/bin/mccl-data-report.py --run-dir <run目录>` 或 `--asym <日志> --sym <日志> --out <xlsx> [--html-out <html>]`。可选 `--goals <json>` 对指定目标尺寸的时延降低%做性能达标判定（见脚本 `judge_goals` 说明）：每个尺寸 `|实测 - 基准| ≤ tolerance`（绝对误差）PASS，否则 FAIL，任一 FAIL 即整轮 FAIL，结论打印到 stdout 并落盘 `<run目录>/性能判定.txt`——这是数据对比层对"性能是否达标"的独立判定，与 `test-result.md` 的机械判定（退出码/故障/hang）两回事，两者结论都要看。
 - **`测试报告.html`**--按《测试报告模版.html》版式的图表报告：Out-of-place 模式下对称 vs 非对称内存的时延对比、带宽对比（绝对值双图）与时延降低(%)/带宽提升(%)（提升幅度双图），共四张 Chart.js 图表，加一段由实际数据驱动的文字总结（用实际数据尺寸（范围）说明哪个场景更优及其极值，如"32KB~16MB数据对称内存更低"，不用"档"的概念，缺数据时如实说明而不是编造结论）。数字与 xlsx 完全一致（同一脚本同一次计算）。同样**只含实际测试的尺寸**，某侧缺失的点位图表自动断开；页内"数据来源"注明各场景取的日志（含重试时取最大 `retry-<k>`）。注意图表依赖 CDN 加载 Chart.js，离线环境打开时图表区为空但表格数据仍在。
 - **`test-preflight.md`**--测试没跑起来时先看这个。首部为执行摘要（执行时间/前置分发/测试规模/产物目录/MD5基准/测试命令，tester 本轮实际核对值），随后是七条checklist（`agents/mccl-tester.md`第4节，含压测参数与override覆盖状态记录），哪条没过、怎么核对的都写在里面。
 - **`test-*.log`**--原始日志，完整输出不摘要不裁剪。

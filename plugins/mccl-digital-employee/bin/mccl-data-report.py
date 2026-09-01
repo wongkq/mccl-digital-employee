@@ -22,14 +22,16 @@
   某场景缺失时如实写"对比未覆盖"。
 - 纯标准库（zipfile + 手写 SpreadsheetML），不依赖 openpyxl--目标机器不一定装了它。
 - 本脚本不引用任何 MCCL_* 环境变量（日志路径由调用方给定），保持 env 引用闭合。
+- 可选 `--goals <json>`：在生成产物的同时，对指定的"性能达标基准"做判等，输出判定
+  结论（PASS/FAIL）。基准不写死在脚本里，由调用方给 JSON（见 judge_goals 的说明）。
 
 用法：
-  mccl-data-report.py --run-dir <dir> [--out <xlsx>] [--html-out <html>]   # 自动选各场景最终日志
-  mccl-data-report.py --asym <log> --sym <log> --out <xlsx> [--html-out <html>]  # 显式指定（测试/手动）
+  mccl-data-report.py --run-dir <dir> [--out <xlsx>] [--html-out <html>] [--goals <json>]  # 自动选各场景最终日志
+  mccl-data-report.py --asym <log> --sym <log> --out <xlsx> [--html-out <html>] [--goals <json>]  # 显式指定（测试/手动）
 
 --run-dir 模式下的日志选择规则：某场景存在 test-<场景>.retry-<k>.log 时取最大 k 的
 那份（mccl-tester 规定"最终判定以最后一次执行为准"），否则用首次 test-<场景>.log；
-两者皆无视为该场景缺失（对应列留空，表尾注明）。
+两者皆无 → 该场景缺失（对应列留空，表尾注明）。
 
 退出码：0=生成成功；2=参数错误；3=没有任何可解析的 perf 数据（两份产物都不生成）。
 """
@@ -304,6 +306,93 @@ def compute_rows(asym, sym):
             entry[mode] = (at, st, lat, ab, sb, bw)
         rows.append((size, size_label(size), entry))
     return rows
+
+
+# ---------------------------------------------------------------------------
+# 性能达标判定（--goals）：把"测试数据对比"里的时延降低列对基准判等，出 PASS/FAIL
+# ---------------------------------------------------------------------------
+# goals JSON 约定（由调用方给出，脚本不硬编码基准；只对给定的目标尺寸判等，
+# 脚本本身不读 MCCL_* 环境变量、不做外部事实判断，是否适用由调用方决定）：
+#
+#   {
+#     "title": "4节点32卡 allreduce 时延降低达标判定",   # 可选，仅用于展示
+#     "compare": "对称内存 vs 非对称内存",              # 可选，仅用于展示
+#     "mode": "oop",                                  # 判哪一列时延降低：oop（默认）| ip
+#     "tolerance": 3,                                 # 允许的绝对误差（百分点）+/-，默认 0
+#     "baselines": {                                  # 目标数据尺寸(标签) -> 基准时延降低(%)
+#       "4MB": 6.0, "8MB": 18.0, "16MB": 24.0, "32MB": 8.0
+#     }
+#   }
+#
+# 判定规则（每个目标尺寸独立）：
+#   实测时延降低% 存在：|实测 - 基准| <= tolerance → 该尺寸 PASS，否则 FAIL。
+#   实测不可得（该尺寸未实测，或场景单侧缺失 → 时延降低% 为 None）：计 FAIL，
+#     理由如实写"数据缺失/单侧缺失，无法判定"，不当作达标掩盖。
+# 整轮结论：所有目标尺寸都 PASS 才 PASS；任一 FAIL（含数据缺失）即 FAIL。
+#   若目标尺寸全部未实测（日志尺寸范围根本没覆盖到），判"不适用(FAIL)"并说明原因。
+#
+# 返回判定文本（多行）。不抛异常：任何异常都作为"无法给出判定"的文本返回，
+# 由主程序按 --goal 传入了就展示，不影响 xlsx/html 生成。
+def judge_goals(goals, rows):
+    def _line(s):
+        return s
+    try:
+        mode = str(goals.get('mode', 'oop'))
+        if mode not in ('oop', 'ip'):
+            return _line('错误：goals.mode 必须为 "oop" 或 "ip"，实际 "%s"。' % mode)
+        tol = goals.get('tolerance')
+        try:
+            tol = float(tol if tol is not None else 0)
+        except (TypeError, ValueError):
+            return _line('错误：goal.tolerance 必须是数字（百分点），实际 "%s"。' % (tol,))
+        bl = goals.get('baselines')
+        if not isinstance(bl, dict) or not bl:
+            return _line('错误：goal.baselines 必须是非空对象 数据尺寸:基准时延降低%。')
+        inv = {}   # 尺寸标签 -> 基准
+        for k, v in bl.items():
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                return _line('错误：goal.baselines[%s] 必须可转 float，实际 "%s"。' % (k, v))
+            inv[str(k)] = v
+    except Exception as e:   # 兜底：任何缺失/异常都不中断产物生成
+        return _line('错误：goal 解析失败：%s' % e)
+
+    mode_text = 'Out-of-place' if mode == 'oop' else 'In-place'
+    head = ['性能达标判定（%s 时延降低%% 对规格基准）' % mode_text]
+    if goals.get('collective') or goals.get('compare'):
+        tail_txt = ' '.join(x for x in
+                             (goals.get('collective'), goals.get('compare')) if x)
+        if tail_txt:
+            head.append(tail_txt)
+    # 尺寸标签 -> 该尺寸两个模式的 entry（取 rows 的 (size,label,entry)）
+    by_label = {}
+    for _s, label, entry in rows:
+        by_label.setdefault(label, entry)
+    lines = list(head)
+    lines.append('%-6s %-10s %-10s %-10s %s' % ('尺寸', '基准%', '实测%', '误差', '结论'))
+    all_ok = True
+    for label in sorted(inv):
+        base = inv[label]
+        entry = by_label.get(label)
+        lat = entry[mode][2] if entry is not None else None
+        if lat is None:
+            reason = ('数据缺失（目标尺寸未实测）' if entry is None
+                      else '单侧数据缺失，时延降低%不可得')
+            lines.append('%-6s %-10s %-10s %-10s FAIL(无法判定)  %s' % (
+                label, _fmt2(base), '-', '-', reason))
+            all_ok = False
+            continue
+        err = lat - base
+        ok = abs(err) <= tol
+        if not ok:
+            all_ok = False
+        lines.append('%-6s %-10s %-10s %-10s %s' % (
+            label, _fmt2(base), _fmt2(lat), _fmt2(err),
+            'PASS' if ok else 'FAIL'))
+    lines.append('判定：%s' % ('PASS' if all_ok else 'FAIL'))
+    lines.append('（说明：误差 = 实测时延降低%% - 基准%%；达标条件 |误差| ≤ %s%% ）' % _fmt2(tol))
+    return '\n'.join(lines)
 
 
 def build_sheet(asym, sym, asym_src, sym_src):
@@ -711,6 +800,9 @@ def main(argv=None):
     ap.add_argument('--out', help='输出 xlsx 路径（--run-dir 模式默认 <run-dir>/测试数据对比.xlsx）')
     ap.add_argument('--html-out', help='输出 html 路径（默认：--run-dir 模式取 <run-dir>/测试报告.html；'
                                        '显式日志模式取 --out 同目录下的 测试报告.html）')
+    ap.add_argument('--goals', help='性能达标基准 JSON 路径：对指定目标尺寸的时延降低%%判等'
+                                    '（见 judge_goals 的 JSON 约定）。--run-dir 模式下判定文本'
+                                    '另写一份到 <run-dir>/性能判定.txt')
     args = ap.parse_args(argv)
 
     if not args.run_dir and not (args.asym or args.sym):
@@ -769,6 +861,25 @@ def main(argv=None):
         print('  数据尺寸：%s~%s 共%d个' % (size_label(min(sizes)), size_label(max(sizes)), len(sizes)))
     else:
         print('  数据尺寸：无')
+
+    # ---- 可选的性能达标判定（--goals）：判等不中断产物，只出结论 ----
+    if args.goals:
+        rows = compute_rows(asym, sym)
+        try:
+            with open(args.goals, encoding='utf-8') as f:
+                goals = json.load(f)
+        except (OSError, ValueError) as e:
+            verdict = '错误：读 --goals 失败：%s' % e
+        else:
+            if not isinstance(goals, dict):
+                verdict = '错误：--goals 内容必须是 JSON 对象。'
+            else:
+                verdict = judge_goals(goals, rows)
+        print('\n' + verdict)
+        if args.run_dir:   # run 目录模式下落盘一份，供审阅/检索
+            verdict_path = os.path.join(args.run_dir, '性能判定.txt')
+            write_text(verdict_path, verdict + '\n')
+            print('已写判定：%s' % verdict_path)
     return 0
 
 

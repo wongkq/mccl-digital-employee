@@ -111,11 +111,32 @@ python3 "$TOOLKIT_ROOT/bin/mccl-data-report.py" --run-dir "$RUN_DIR"
 - 其他非零退出码：把 stderr 原样转述给用户，不静默吞掉。
 - HTML 的 Chart.js 由 CDN 加载，离线环境打开时图表不渲染（数字仍在页面数据数组与总结段里）--用户问到就这么答，不是缺陷。
 
+#### 5.5.1 性能达标判定（`--goals`，可选）
+
+主控可在生成数据对比产物的同时，对指定的"性能达标基准"（如 4节点32卡 allreduce 的
+时延降低目标值）做判等。基准不写死在脚本里，由主控给一个 JSON（见
+`bin/mccl-data-report.py` 的 `judge_goals` 说明）：
+
+```bash
+python3 "$TOOLKIT_ROOT/bin/mccl-data-report.py" --run-dir "$RUN_DIR" --goals "$REPO_ROOT/mccl-goals.json"
+```
+
+- 判定按 goals 里 `mode`（默认 `oop`）的时延降低%列，对 `baselines` 里每个目标尺寸判：
+  `|实测 - 基准| <= tolerance`（绝对误差，百分点）该尺寸 PASS，否则 FAIL；任一 FAIL
+  （含目标尺寸未实测/单侧缺失无法判定）即整轮 FAIL，全部 PASS 才 PASS。
+- 判定结论打印到 stdout，并落盘 `$RUN_DIR/性能判定.txt`；`tolerance`、`baselines`、`mode`
+  由主控在调用时传入的 goals JSON 决定，脚本不硬编码。
+- **本步骤判定与 `test-result.md` 的机械判定是两回事**：`test-result.md` 判的是"测试
+  是否干净执行完"（退出码/故障/hang/正确性）；性能达标判定判的是"时延降低是否达到目标"。
+  两个结论都要如实转述，不能因为其中一个 FAIL 就掩盖另一个。
+
+主控若不提供 `--goals`，本步等价于现状（只生成 xlsx/html，不做性能达标判定)。
+
 这一步不经过 `mccl-reporter`（它无 Bash，这是物理隔离，不动）；两份产物都是对原始日志的程序化转录，每个数字可回溯到产物末尾注明的日志文件。
 
 ## 6. 收尾
 
-向用户输出 `test-result.md`、`final-report.md`、`测试数据对比.xlsx` 与 `测试报告.html`（若生成成功）的**绝对路径**，并一句话转述报告结论（PASS/FAIL + 关键原因）。若 `mccl-perf-override.json` 存在（本轮有活跃覆盖），额外打印一行覆盖清单（如"本轮使用了参数覆盖：MCCL_PERF_BEGIN=16K；说'清除覆盖'可恢复默认"）。提示用户：本命令只测试+出报告，不 commit；是否 commit 由人工确认后自行执行。
+向用户输出 `test-result.md`、`final-report.md`、`测试数据对比.xlsx` 与 `测试报告.html`（若生成成功）的**绝对路径**，并一句话转述报告结论（PASS/FAIL + 关键原因）。若本轮用了 `--goals` 性能达标判定，另转述 `性能判定.txt` 的结论（PASS/FAIL + 哪个尺寸未达标）——它独立于 `test-result.md` 的机械判定，两者结论都要给到用户。若 `mccl-perf-override.json` 存在（本轮有活跃覆盖），额外打印一行覆盖清单（如"本轮使用了参数覆盖：MCCL_PERF_BEGIN=16K；说'清除覆盖'可恢复默认"）。提示用户：本命令只测试+出报告，不 commit；是否 commit 由人工确认后自行执行。
 
 ## 7. 不做的事
 
