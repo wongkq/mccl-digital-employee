@@ -202,6 +202,9 @@ if [ -f "$loader" ] && [ -f "$example_json" ]; then
   eval "$(python3 "$loader" "$odir/mccl-env.json" 2>/dev/null)"
   [ "${MCCL_PERF_ARGS:-}" = "-b 32K -e 32M -f 2 -n 20000 -c 1 -w 200 -o sum -d float -G 100" ] \
     || perf_bad="$perf_bad 默认MCCL_PERF_ARGS错(${MCCL_PERF_ARGS:-?})"
+  # all_gather 派生键：尺寸档 8M..512M ×2，执行键复用 all_reduce 的共享键
+  [ "${MCCL_AGATHER_PERF_ARGS:-}" = "-b 8M -e 512M -f 2 -n 20000 -c 1 -w 200 -o sum -d float -G 100" ] \
+    || perf_bad="$perf_bad 默认MCCL_AGATHER_PERF_ARGS错(${MCCL_AGATHER_PERF_ARGS:-?})"
   [ -z "${MCCL_PERF_OVERRIDDEN_KEYS:-}" ] \
     || perf_bad="$perf_bad 无override时OVERRIDDEN_KEYS应为空(${MCCL_PERF_OVERRIDDEN_KEYS:-?})"
   # override 生效
@@ -225,6 +228,18 @@ if [ -f "$loader" ] && [ -f "$example_json" ]; then
   echo '{"MCCL_PERF_ITERS": "abc"}' > "$odir/mccl-perf-override.json"
   if python3 "$loader" "$odir/mccl-env.json" >/dev/null 2>&1; then
     perf_bad="$perf_bad 非整数ITERS未报错"
+  fi
+  rm -f "$odir/mccl-perf-override.json"
+  # 非整数 AGATHER_FACTOR 必须报错（all_gather 派生键的整数校验）
+  python3 - "$odir/mccl-env.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p, encoding='utf-8'))
+d['MCCL_AGATHER_FACTOR'] = 'abc'
+json.dump(d, open(p, 'w', encoding='utf-8'))
+PY
+  if python3 "$loader" "$odir/mccl-env.json" >/dev/null 2>&1; then
+    perf_bad="$perf_bad 非整数AGATHER_FACTOR未报错"
   fi
   rm -rf "$odir"
   if [ -n "$perf_bad" ]; then

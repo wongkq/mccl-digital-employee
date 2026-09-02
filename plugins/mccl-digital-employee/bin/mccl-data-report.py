@@ -29,11 +29,18 @@
   mccl-data-report.py --run-dir <dir> [--out <xlsx>] [--html-out <html>] [--goals <json>]  # 自动选各场景最终日志
   mccl-data-report.py --asym <log> --sym <log> --out <xlsx> [--html-out <html>] [--goals <json>]  # 显式指定（测试/手动）
 
+两对场景各自产出独立对比产物：
+  - all_reduce 对（场景A 非对称 / 场景B 对称）→ `测试数据对比.xlsx` + `测试报告.html`
+  - all_gather 对（场景C 非对称 / 场景D 对称）→ `测试数据对比-agather.xlsx` + `测试报告-agather.html`
+  --run-dir 模式自动用 pick_final_log 选 all_gather 对（stem=agather-asymmetric/agather-symmetric）
+  的最终日志；显式模式给 --agather-asym/--agather-sym。缺 all_gather 日志时该对跳过、all_reduce 照常生成。
+  --goals 判定只对 all_reduce 主对生效。
+
 --run-dir 模式下的日志选择规则：某场景存在 test-<场景>.retry-<k>.log 时取最大 k 的
 那份（mccl-tester 规定"最终判定以最后一次执行为准"），否则用首次 test-<场景>.log；
 两者皆无 → 该场景缺失（对应列留空，表尾注明）。
 
-退出码：0=生成成功；2=参数错误；3=没有任何可解析的 perf 数据（两份产物都不生成）。
+退出码：0=生成成功；2=参数错误；3=所有场景都没有可解析的 perf 数据（不生成任何产物）。
 """
 import argparse
 import json
@@ -790,17 +797,20 @@ def write_text(path, content):
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog='mccl-data-report.py',
-        description='解析场景A/B原始日志，一次生成两份对比产物：测试数据对比.xlsx（按《测试数据对比模版.xlsx》版式）'
-                    '与 测试报告.html（按《测试报告模版.html》版式的 Chart.js 图表报告）。'
+        description='解析场景A/B/C/D原始日志，一次生成对比产物：all_reduce 场景对（A/B）产出'
+                    ' 测试数据对比.xlsx 与 测试报告.html；all_gather 场景对（C/D）产出'
+                    ' 测试数据对比-agather.xlsx 与 测试报告-agather.html。'
                     '只统计实际测试的尺寸；带宽取 busbw 口径。')
     ap.add_argument('--run-dir', help='run 目录：自动选各场景最终日志'
                                       '（有 test-*.retry-<k>.log 取最大 k，否则首次 test-*.log）')
-    ap.add_argument('--asym', help='场景A（非对称内存）日志路径，显式指定')
-    ap.add_argument('--sym', help='场景B（对称内存）日志路径，显式指定')
+    ap.add_argument('--asym', help='场景A（all_reduce 非对称内存）日志路径，显式指定')
+    ap.add_argument('--sym', help='场景B（all_reduce 对称内存）日志路径，显式指定')
+    ap.add_argument('--agather-asym', help='场景C（all_gather 非对称内存）日志路径，显式指定')
+    ap.add_argument('--agather-sym', help='场景D（all_gather 对称内存）日志路径，显式指定')
     ap.add_argument('--out', help='输出 xlsx 路径（--run-dir 模式默认 <run-dir>/测试数据对比.xlsx）')
     ap.add_argument('--html-out', help='输出 html 路径（默认：--run-dir 模式取 <run-dir>/测试报告.html；'
                                        '显式日志模式取 --out 同目录下的 测试报告.html）')
-    ap.add_argument('--goals', help='性能达标基准 JSON 路径：对指定目标尺寸的时延降低%%判等'
+    ap.add_argument('--goals', help='性能达标基准 JSON 路径：只对 all_reduce 主对的目标尺寸时延降低%%判等'
                                     '（见 judge_goals 的 JSON 约定）。--run-dir 模式下判定文本'
                                     '另写一份到 <run-dir>/性能判定.txt')
     args = ap.parse_args(argv)
@@ -812,59 +822,90 @@ def main(argv=None):
         sys.stderr.write('错误：显式日志模式下 --out 必填\n')
         return 2
 
-    asym_src = sym_src = None
+    def pick(src_arg, stem):
+        """显式 --src 优先，否则 run_dir 下按 stem 选最终日志。"""
+        if src_arg:
+            return src_arg
+        if args.run_dir:
+            return pick_final_log(args.run_dir, stem)
+        return None
+
+    def generate(asym_src, sym_src, out_xlsx, out_html, pair_label):
+        """解析一对日志并写出 xlsx + html。返回 (有任何数据?, 来源名1, 来源名2)。"""
+        asym = parse_log(asym_src) if asym_src and os.path.isfile(asym_src) else None
+        sym = parse_log(sym_src) if sym_src and os.path.isfile(sym_src) else None
+        if asym_src and not os.path.isfile(asym_src):
+            sys.stderr.write('警告：%s 非对称日志不存在：%s\n' % (pair_label, asym_src))
+        if sym_src and not os.path.isfile(sym_src):
+            sys.stderr.write('警告：%s 对称日志不存在：%s\n' % (pair_label, sym_src))
+        asym_name = os.path.basename(asym_src) if asym_src and os.path.isfile(asym_src) else None
+        sym_name = os.path.basename(sym_src) if sym_src and os.path.isfile(sym_src) else None
+        any_data = bool(asym or sym)
+        if not any_data:
+            return False, asym_src, sym_src
+        write_xlsx(out_xlsx, build_sheet(asym, sym, asym_name, sym_name))
+        write_text(out_html, build_html(asym, sym, asym_name, sym_name))
+        print('已生成：%s' % out_xlsx)
+        print('已生成：%s' % out_html)
+        print('  %s 非对称来源：%s' % (pair_label, asym_src or '缺失'))
+        print('  %s 对称来源：%s' % (pair_label, sym_src or '缺失'))
+        sizes = set(asym or {}) | set(sym or {})
+        if sizes:
+            print('  %s 尺寸：%s~%s 共%d个' % (pair_label, size_label(min(sizes)),
+                                               size_label(max(sizes)), len(sizes)))
+        else:
+            print('  %s 尺寸：无' % pair_label)
+        return True, asym_src, sym_src
+
     if args.run_dir:
         if not os.path.isdir(args.run_dir):
             sys.stderr.write('错误：run 目录不存在：%s\n' % args.run_dir)
             return 2
-        if not args.out:
-            args.out = os.path.join(args.run_dir, '测试数据对比.xlsx')
-        if not args.html_out:
-            args.html_out = os.path.join(args.run_dir, '测试报告.html')
-        if args.asym:
-            asym_src = args.asym
-        else:
-            asym_src = pick_final_log(args.run_dir, 'asymmetric')
-        if args.sym:
-            sym_src = args.sym
-        else:
-            sym_src = pick_final_log(args.run_dir, 'symmetric')
+
+    # ---- 主对：all_reduce（场景A/B）。输出名与历史一致（--out/--html-out 可覆盖）----
+    if args.run_dir:
+        ar_out = args.out or os.path.join(args.run_dir, '测试数据对比.xlsx')
+        ar_html = args.html_out or os.path.join(args.run_dir, '测试报告.html')
     else:
-        asym_src = args.asym
-        sym_src = args.sym
-        if not args.html_out:
-            args.html_out = os.path.join(os.path.dirname(os.path.abspath(args.out)) or '.',
-                                         '测试报告.html')
+        ar_out = args.out
+        ar_html = args.html_out or os.path.join(os.path.dirname(os.path.abspath(args.out)) or '.',
+                                                '测试报告.html')
 
-    asym = parse_log(asym_src) if asym_src and os.path.isfile(asym_src) else None
-    sym = parse_log(sym_src) if sym_src and os.path.isfile(sym_src) else None
-    if asym_src and not os.path.isfile(asym_src):
-        sys.stderr.write('警告：场景A日志不存在：%s\n' % asym_src)
-    if sym_src and not os.path.isfile(sym_src):
-        sys.stderr.write('警告：场景B日志不存在：%s\n' % sym_src)
+    ar_asym = pick(args.asym, 'asymmetric')
+    ar_sym = pick(args.sym, 'symmetric')
+    ar_ok, ar_asym_src, ar_sym_src = generate(ar_asym, ar_sym, ar_out, ar_html, 'all_reduce')
 
-    if not asym and not sym:
-        sys.stderr.write('错误：两份日志都没有可解析的 perf 数据，不生成对比产物（xlsx 与 html 均不生成）'
+    # ---- 副对：all_gather（场景C/D）。输出名固定 -agather 后缀 ----
+    ag_asym = pick(args.agather_asym, 'agather-asymmetric')
+    ag_sym = pick(args.agather_sym, 'agather-symmetric')
+    if args.run_dir:
+        ag_out = os.path.join(args.run_dir, '测试数据对比-agather.xlsx')
+        ag_html = os.path.join(args.run_dir, '测试报告-agather.html')
+    else:
+        ag_dir = os.path.dirname(os.path.abspath(args.out)) or '.'
+        ag_out = os.path.join(ag_dir, '测试数据对比-agather.xlsx')
+        ag_html = os.path.join(ag_dir, '测试报告-agather.html')
+    if ag_asym or ag_sym:
+        ag_ok, _ag_a, _ag_s = generate(ag_asym, ag_sym, ag_out, ag_html, 'all_gather')
+    else:
+        ag_ok = False
+        if args.run_dir:
+            sys.stderr.write('提示：run 目录下无 all_gather 场景日志（agather-asymmetric/agather-symmetric），'
+                             'agather 对比产物跳过\n')
+        else:
+            sys.stderr.write('提示：未给 all_gather 场景日志（--agather-asym/--agather-sym），'
+                             'agather 对比产物跳过\n')
+
+    if not ar_ok and not ag_ok:
+        sys.stderr.write('错误：所有场景日志都没有可解析的 perf 数据，不生成对比产物'
                          '（测试可能根本没跑起来，结论以 test-result.md / final-report.md 为准）\n')
         return 3
 
-    asym_name = os.path.basename(asym_src) if asym_src and os.path.isfile(asym_src) else None
-    sym_name = os.path.basename(sym_src) if sym_src and os.path.isfile(sym_src) else None
-    write_xlsx(args.out, build_sheet(asym, sym, asym_name, sym_name))
-    write_text(args.html_out, build_html(asym, sym, asym_name, sym_name))
-    print('已生成：%s' % args.out)
-    print('已生成：%s' % args.html_out)
-    print('  非对称内存来源：%s' % (asym_src or '缺失'))
-    print('  对称内存来源：%s' % (sym_src or '缺失'))
-    sizes = set(asym or {}) | set(sym or {})
-    if sizes:
-        print('  数据尺寸：%s~%s 共%d个' % (size_label(min(sizes)), size_label(max(sizes)), len(sizes)))
-    else:
-        print('  数据尺寸：无')
-
-    # ---- 可选的性能达标判定（--goals）：判等不中断产物，只出结论 ----
-    if args.goals:
-        rows = compute_rows(asym, sym)
+    # ---- 可选的性能达标判定（--goals）：只对 all_reduce 主对判等，不中断产物 ----
+    if args.goals and ar_ok:
+        ar_asym = parse_log(ar_asym_src) if ar_asym_src and os.path.isfile(ar_asym_src) else None
+        ar_sym = parse_log(ar_sym_src) if ar_sym_src and os.path.isfile(ar_sym_src) else None
+        rows = compute_rows(ar_asym, ar_sym)
         try:
             with open(args.goals, encoding='utf-8') as f:
                 goals = json.load(f)

@@ -349,6 +349,73 @@ assert_contains "用例8c 缺失尺寸-16MB注记" "$OUT8C" "16MB"
 assert_contains "用例8c 缺失尺寸-32MB注记" "$OUT8C" "32MB"
 
 # =====================================================================
+# --- 9. all_gather 场景对（场景C/D，8MB..512MB 共7档）：产出 -agather 产物，数值正确 ---
+# =====================================================================
+mkdir -p "$TMP/run9"
+# all_gather 日志与 all_reduce 同形（同一 perf.cpp 打印），reuse mklog 造数据
+mklog "$TMP/run9/test-agather-asymmetric.log" \
+  "8388608 400.0 40.0 399.0 40.0" \
+  "16777216 700.0 45.0 699.0 45.0" \
+  "33554432 1200.0 48.0 1199.0 48.0" \
+  "67108864 2000.0 50.0 1999.0 50.0" \
+  "134217728 3400.0 52.0 3399.0 52.0" \
+  "268435456 6000.0 54.0 5999.0 54.0" \
+  "536870912 10000.0 55.0 9999.0 55.0"
+mklog "$TMP/run9/test-agather-symmetric.log" \
+  "8388608 380.0 41.0 379.0 41.0" \
+  "16777216 660.0 46.0 659.0 46.0" \
+  "33554432 1140.0 49.0 1139.0 49.0" \
+  "67108864 1900.0 51.0 1899.0 51.0" \
+  "134217728 3230.0 55.0 3229.0 55.0" \
+  "268435456 5700.0 57.0 5699.0 57.0" \
+  "536870912 9500.0 58.0 9499.0 58.0"
+python3 "$STATS" --run-dir "$TMP/run9" > "$TMP/run9.out" 2>&1
+assert_eq "用例9 退出码0" "0" "$?"
+# all_gather 对产物生成
+GXLSX="$TMP/run9/测试数据对比-agather.xlsx"
+[ -f "$GXLSX" ] && echo "ok:   用例9 agather产物存在" && pass=$((pass+1)) || { echo "FAIL: 用例9 agather产物不存在" >&2; fail=$((fail+1)); }
+xml_ok "$GXLSX"; assert_eq "用例9 agather XML良构" "0" "$?"
+GTXT=$(sheet_text "$GXLSX")
+assert_contains "用例9 含8MB行" "$GTXT" ">8MB<"
+assert_contains "用例9 含512MB行" "$GTXT" ">512MB<"
+assert_contains "用例9 含256MB行（中间档）" "$GTXT" ">256MB<"
+assert_not_contains "用例9 不含1MB（未测档）" "$GTXT" ">1MB<"
+# 8MB 行：agather 非对称时延400.0、对称380.0；时延降低% = (400-380)/400*100 = 5.0
+assert_eq "用例9 非对称时延(oop,8MB行)" "400" "$(cell_val "$GXLSX" B5)"
+assert_eq "用例9 对称时延(oop,8MB行)" "380" "$(cell_val "$GXLSX" C5)"
+assert_eq "用例9 时延降低%(oop,8MB行)" "5" "$(cell_val "$GXLSX" D5)"
+# all_gather 无 all_reduce 来源，表尾注明 agather 来源
+assert_contains "用例9 agather数据来源" "$GTXT" "数据来源：非对称内存=test-agather-asymmetric.log"
+[ -f "$TMP/run9/测试报告-agather.html" ] && echo "ok:   用例9 agather html存在" && pass=$((pass+1)) || { echo "FAIL: 用例9 agather html不存在" >&2; fail=$((fail+1)); }
+assert_contains "用例9 html来源注记agather" "$(html_text "$TMP/run9/测试报告-agather.html")" "test-agather-symmetric.log"
+# 该 run 目录只有 agather 日志，不应误生成 all_reduce 产物
+[ ! -f "$TMP/run9/测试数据对比.xlsx" ] && echo "ok:   用例9 无误生成all_reduce xlsx" && pass=$((pass+1)) || { echo "FAIL: 用例9 误生成all_reduce xlsx" >&2; fail=$((fail+1)); }
+
+# =====================================================================
+# --- 10. all_reduce + all_gather 混合 run 目录：两对各自出产物；缺 agather 日志时 agather 跳过、all_reduce 照常 ---
+# =====================================================================
+mkdir -p "$TMP/run10"
+mklog "$TMP/run10/test-asymmetric.log" "32768 45.99 1.38 45.91 1.38"
+mklog "$TMP/run10/test-symmetric.log"  "32768 45.50 1.38 45.45 1.38"
+mklog "$TMP/run10/test-agather-asymmetric.log" "8388608 400.0 40.0 399.0 40.0"
+mklog "$TMP/run10/test-agather-symmetric.log"  "8388608 360.0 40.0 359.0 40.0"
+python3 "$STATS" --run-dir "$TMP/run10" > "$TMP/run10.out" 2>&1
+rc10=$?
+assert_eq "用例10 退出码0" "0" "$rc10"
+[ -f "$TMP/run10/测试数据对比.xlsx" ] && echo "ok:   用例10 all_reduce xlsx存在" && pass=$((pass+1)) || { echo "FAIL: 用例10 all_reduce xlsx不存在" >&2; fail=$((fail+1)); }
+[ -f "$TMP/run10/测试数据对比-agather.xlsx" ] && echo "ok:   用例10 agather xlsx存在" && pass=$((pass+1)) || { echo "FAIL: 用例10 agather xlsx不存在" >&2; fail=$((fail+1)); }
+
+# 缺 agather 日志：agather 跳过（提示），all_reduce 照常生成
+mkdir -p "$TMP/run10b"
+mklog "$TMP/run10b/test-asymmetric.log" "32768 45.99 1.38 45.91 1.38"
+mklog "$TMP/run10b/test-symmetric.log"  "32768 45.50 1.38 45.45 1.38"
+python3 "$STATS" --run-dir "$TMP/run10b" > "$TMP/run10b.out" 2>&1
+assert_eq "用例10b 退出码0" "0" "$?"
+assert_contains "用例10b 提示agather跳过" "$(cat "$TMP/run10b.out")" "agather 对比产物跳过"
+[ -f "$TMP/run10b/测试数据对比.xlsx" ] && echo "ok:   用例10b all_reduce照常生成" && pass=$((pass+1)) || { echo "FAIL: 用例10b all_reduce未生成" >&2; fail=$((fail+1)); }
+[ ! -f "$TMP/run10b/测试数据对比-agather.xlsx" ] && echo "ok:   用例10b 无agather产物" && pass=$((pass+1)) || { echo "FAIL: 用例10b 误生成agather产物" >&2; fail=$((fail+1)); }
+
+# =====================================================================
 echo
 echo "PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

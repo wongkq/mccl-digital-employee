@@ -25,6 +25,13 @@ out=$(python3 "$STATS" parse_perf_line "$line")
 assert_eq "parse algbw" "95.2" "$(printf '%s' "$out" | grep -oP 'algbw=\K[0-9.]+')"
 assert_eq "parse busbw" "180.0" "$(printf '%s' "$out" | grep -oP 'busbw=\K[0-9.]+')"
 
+# --- 1b. all_gather_perf 输出同形（子集行含 "algbw <v> busbw <v>"），parse 同样成立 ---
+# 实测数据行与尺寸无关，all_gather 的 algbw/busbw 行与 all_reduce 完全同形（同一 perf.cpp 打印）。
+gl="size 8388608 algbw 44.11 busbw 88.22"
+gout=$(python3 "$STATS" parse_perf_line "$gl")
+assert_eq "agather parse algbw" "44.11" "$(printf '%s' "$gout" | grep -oP 'algbw=\K[0-9.]+')"
+assert_eq "agather parse busbw" "88.22" "$(printf '%s' "$gout" | grep -oP 'busbw=\K[0-9.]+')"
+
 # --- 2. aggregate_metrics：3 个值算 mean/min/max ---
 # 输入：每行一个 "algbw <v> busbw <v>"，输出 JSON {"algbw_GBs":{mean,min,max},"busbw_GBs":{...}}
 printf 'algbw 95.2 busbw 180.0\nalgbw 94.1 busbw 178.0\nalgbw 96.0 busbw 182.0\n' > "$TMP/in.txt"

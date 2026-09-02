@@ -26,7 +26,12 @@
     MCCL_PERF_ARGS     = 由 9 个 MCCL_PERF_* raw 键拼出的 all_reduce_perf 参数串
                          "-b <BEGIN> -e <END> -f <FACTOR> -n <ITERS> -c <CHECK>
                           -w <WARMUP> -o <OP> -d <DTYPE> -G <GPU_CHECK_ITERS>"
-    MCCL_PERF_OVERRIDDEN_KEYS = 本轮被 override 文件覆盖的 perf 键名（空格分隔，无则空）
+    MCCL_AGATHER_PERF_ARGS = 由 5 个 MCCL_AGATHER_* raw 键 + 6 个共享执行键拼出的
+                         all_gather_perf 参数串（场景C/D 用，尺寸档 8M..512M/×2）
+                         "-b <BEGIN> -e <END> -f <FACTOR> -n <ITERS> -c <CHECK>
+                          -w <WARMUP> -o <OP> -d <DTYPE> -G <GPU_CHECK_ITERS>"
+                         共享键复用 MCCL_PERF_ITERS/WARMUP/CHECK/OP/DTYPE/GPU_CHECK_ITERS。
+    MCCL_PERF_OVERRIDDEN_KEYS = 本次被 override 文件覆盖的 perf 键名（空格分隔，无则空）
 
 压测参数覆盖（自然语言改参的落点）：
   json 同目录下若存在 mccl-perf-override.json（不入库，见 .gitignore），其中
@@ -66,6 +71,14 @@ REQUIRED_RAW = [
     "MCCL_PERF_OP",
     "MCCL_PERF_DTYPE",
     "MCCL_PERF_GPU_CHECK_ITERS",
+    # all_gather_perf 压测参数（场景C/D 用，5 个；尺寸档位 + 二进制。
+    # 执行键 ITERS/WARMUP/CHECK/OP/DTYPE/GPU_CHECK_ITERS 复用上面的 MCCL_PERF_*。
+    # 尺寸档 8M..512M/×2 = 8,16,32,64,128,256,512MB 共 7 档）
+    "MCCL_AGATHER_BIN_ASYM",
+    "MCCL_AGATHER_BIN_SYM",
+    "MCCL_AGATHER_BEGIN",
+    "MCCL_AGATHER_END",
+    "MCCL_AGATHER_FACTOR",
 ]
 
 # 必须是整数的 perf 键（用于拼 -f/-n/-w/-c/-G）
@@ -75,6 +88,7 @@ PERF_INT_KEYS = [
     "MCCL_PERF_WARMUP",
     "MCCL_PERF_CHECK",
     "MCCL_PERF_GPU_CHECK_ITERS",
+    "MCCL_AGATHER_FACTOR",
 ]
 
 OVERRIDE_FILENAME = "mccl-perf-override.json"
@@ -119,6 +133,13 @@ def derive(raw, overridden_keys):
         "-n {MCCL_PERF_ITERS} -c {MCCL_PERF_CHECK} -w {MCCL_PERF_WARMUP} "
         "-o {MCCL_PERF_OP} -d {MCCL_PERF_DTYPE} -G {MCCL_PERF_GPU_CHECK_ITERS}"
     ).format(**{k: raw[k] for k in raw})
+    # all_gather：尺寸档专属（MCCL_AGATHER_*），执行键复用 MCCL_PERF_ITERS/WARMUP/
+    # CHECK/OP/DTYPE/GPU_CHECK_ITERS（gather/reduce 通用，避免两套重复配置）。
+    agather_args = (
+        "-b {MCCL_AGATHER_BEGIN} -e {MCCL_AGATHER_END} -f {MCCL_AGATHER_FACTOR} "
+        "-n {MCCL_PERF_ITERS} -c {MCCL_PERF_CHECK} -w {MCCL_PERF_WARMUP} "
+        "-o {MCCL_PERF_OP} -d {MCCL_PERF_DTYPE} -G {MCCL_PERF_GPU_CHECK_ITERS}"
+    ).format(**{k: raw[k] for k in raw})
     return {
         "MCCL_NODE0_IP": nodes[0],
         "MCCL_NNODES": len(nodes),
@@ -131,6 +152,7 @@ def derive(raw, overridden_keys):
             raw["MCCL_MACA_LIB_DIR"], raw["MCCL_OMPI_LIB_PATH"]
         ),
         "MCCL_PERF_ARGS": perf_args,
+        "MCCL_AGATHER_PERF_ARGS": agather_args,
         "MCCL_PERF_OVERRIDDEN_KEYS": " ".join(sorted(overridden_keys)),
     }
 

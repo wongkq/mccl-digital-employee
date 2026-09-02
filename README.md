@@ -15,7 +15,7 @@ MCCL（MetaX Collective Communications Library）数字员工工具包：当前�
 
 | Agent | 职责 | 工具 |
 |---|---|---|
-| `mccl-tester` | 按`$MCCL_NNODES`选择拓扑：多节点（4/8，每节点8卡）跑场景A（非对称内存）+ 场景B（对称内存）两个`mpirun`测试；其余拓扑（含单节点）判为不支持、停止上报。压测参数从`mccl-env.json`的`MCCL_PERF_*`键读取（支持`mccl-perf-override.json`临时覆盖）。日志命中驱动warm reset特征（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`）时按15分钟间隔自动重试至多5次，额度耗尽即放弃该场景、转下一个场景继续（单场景失败不中断整轮）。产出原始日志。不改代码、不重新编译。 | 含Bash |
+| `mccl-tester` | 按`$MCCL_NNODES`选择拓扑：多节点（4/8，每节点8卡）跑场景A/B/C/D 共4 个`mpirun`测试（A all_reduce非对称、B all_reduce对称`-R 2`、C all_gather非对称、D all_gather对称`-R 2`）；其余拓扑（含单节点）判为不支持、停止上报。all_reduce 压测参数从`mccl-env.json`的`MCCL_PERF_*`键读取（支持`mccl-perf-override.json`临时覆盖），all_gather 尺寸档（8M..512M）从`MCCL_AGATHER_*`键读取。日志命中驱动warm reset特征（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`）时按15分钟间隔自动重试至多5次，额度耗尽即放弃该场景、转下一个场景继续（单场景失败不中断整轮）。产出原始日志。不改代码、不重新编译。 | 含Bash |
 | `mccl-reporter` | 读run目录产物，写验证报告，每个数字必须能在原始日志里找到出处，未覆盖场景标"未覆盖"不得推断。 | **无Bash**（见下） |
 
 编排入口（当前可用）：`/mccl-test`（测试+报告一条龙）。原完整流水线入口 `/mccl-run` 已废弃（依赖已移除的 developer/supervisor），`/mccl-bench`、`/mccl-impact-run` 同样废弃。
@@ -294,7 +294,7 @@ bash <插件>/bin/mccl-setup-ssh
 
 | `$MCCL_NODES`个数 | `$MCCL_GPUS_PER_NODE` | 拓扑 | 测什么 | 不测什么 |
 |---|---|---|---|---|
-| 4 | **8** | OAM32 | 场景A（非对称内存，`$MCCL_PERF_BIN_ASYM`）+ 场景B（对称内存，`$MCCL_PERF_BIN_SYM -R 2`）两个32卡`mpirun`测试，`extLsaSize=11` | 无（这是本工具包原本针对的完整拓扑） |
+| 4 | **8** | OAM32 | 场景A/B/C/D 共4 个32卡`mpirun`测试：A（all_reduce 非对称，`$MCCL_PERF_BIN_ASYM`）、B（all_reduce 对称，`$MCCL_PERF_BIN_SYM -R 2`）、C（all_gather 非对称，`$MCCL_AGATHER_BIN_ASYM`，尺寸档 8M..512M）、D（all_gather 对称，`$MCCL_AGATHER_BIN_SYM -R 2`），`extLsaSize=11` | 无（这是本工具包原本针对的完整拓扑） |
 | 8 | **8** | OAM64 | 同OAM32，`-np 64`，`extLsaSize=15` | 无 |
 | 4 或 8 | `!=8`（如"4节点2卡"） | **不支持** | 不跑 | 全部——节点数达标但每节点卡数不是8，代码里硬编码的`nodeSize=8`/`GROUP=8`与实际拓扑对不上，对称内存路径同样不会按设计启用，与下面"其他节点数"档是同一条fallback逻辑，归入同一档处理 |
 | 其他节点数（1/2/3/5/6/7/9+...） | 任意 | **不支持** | 不跑 | 全部——`CliqueManager::IsSupported()`的OAM32分支不匹配这些节点数，对称内存路径不会启用，会静默fallback到Ring/Tree。在这种拓扑下继续跑比不跑更有害：会产生一份看起来"跑通了、有perf数据"的报告，但报告里的数字压根没测到对称内存路径。测试子代理开工时会先做拓扑合法性校验，遇到这两档**停止并上报，不跑任何mpirun**（见`agents/mccl-tester.md`，闷头跑了也是白跑） |
@@ -381,13 +381,17 @@ test-asymmetric.log、test-symmetric.log、test-result.md（如有test-anomaly.m
 └── attempt-1/
     ├── change.patch                 # git diff，报告变更基准（工作区无改动则为空）
     ├── test-preflight.md            # 测试前置核对
-    ├── test-asymmetric.log          # 场景A日志
-    ├── test-symmetric.log           # 场景B日志
+    ├── test-asymmetric.log            # 场景A日志（all_reduce 非对称）
+    ├── test-symmetric.log             # 场景B日志（all_reduce 对称）
+    ├── test-agather-asymmetric.log    # 场景C日志（all_gather 非对称）
+    ├── test-agather-symmetric.log     # 场景D日志（all_gather 对称）
     ├── [test-*.retry-<k>.log]       # 仅驱动warm reset重试时出现，第k次重试的原始日志
     ├── test-result.md               # 测试结论（PASS/FAIL）
     ├── [test-anomaly.md]            # 仅异常时出现
-    ├── 测试数据对比.xlsx             # Excel数据对比表（mccl-data-report.py 生成，仅实际测试的尺寸）
-    ├── 测试报告.html                # HTML图表报告（同脚本生成，Chart.js 四图+总结段）
+    ├── 测试数据对比.xlsx             # all_reduce 数据对比表（mccl-data-report.py 生成，仅实际测试的尺寸）
+    ├── 测试报告.html                # all_reduce HTML图表报告（同脚本生成，Chart.js 四图+总结段）
+    ├── 测试数据对比-agather.xlsx     # all_gather 数据对比表（存在 agather 日志时生成）
+    ├── 测试报告-agather.html        # all_gather HTML图表报告（存在 agather 日志时生成）
     ├── report-1.md                  # 验证报告（mccl-reporter 产出）
     └── final-report.md              # report-1.md 的拷贝，最终报告
 ```
@@ -536,7 +540,7 @@ plugins/mccl-digital-employee/
 │   ├── mccl-bench-stats.py          bench性能聚合纯函数（mean/min/max→bench-stats.json）
 │   └── mccl-queue-scheduler         bench队列调度器（flock+cron触发）
 ├── agents/
-│   ├── mccl-tester.md               测试（preflight+mpirun场景A/B）
+│   ├── mccl-tester.md               测试（preflight+mpirun场景A/B/C/D）
 │   ├── mccl-reporter.md             报告（禁Bash，物理隔离）
 │   ├── mccl-prober.md               GPU环境门禁
 │   ├── mccl-bench-planner.md        性能场景规划
