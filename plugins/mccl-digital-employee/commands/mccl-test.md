@@ -34,19 +34,20 @@ eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 用户可能在本次请求里用自然语言改了压测参数（如"起始尺寸改成 16K"、"迭代次数 5000"、"数据类型用 half"）。这类改动**不改 `mccl-env.json`**（那是默认值），而是落到覆盖文件 `$REPO_ROOT/mccl-perf-override.json`（不入库）：
 
 - **识别映射**：起始尺寸→`MCCL_PERF_BEGIN`，结束尺寸→`MCCL_PERF_END`，倍乘因子→`MCCL_PERF_FACTOR`，迭代次数→`MCCL_PERF_ITERS`，预热次数→`MCCL_PERF_WARMUP`，校验开关→`MCCL_PERF_CHECK`，归约操作→`MCCL_PERF_OP`，数据类型→`MCCL_PERF_DTYPE`，GPU校验迭代数→`MCCL_PERF_GPU_CHECK_ITERS`。映射不上的参数名，向用户澄清，不要猜。
-- **写入**：文件已存在则读出、合并新键、写回（保留已有覆盖）；不存在则新建。只放 `MCCL_PERF_*` / `MCCL_STRESS_*` 键。
+- **写入**：文件已存在则读出、合并新键、写回（保留已有覆盖）；不存在则新建。只放 `MCCL_PERF_*` / `MCCL_STRESS_*` / `MCCL_AGATHER_STRESS_*` 键。
 - **清除**：用户说"清除压测参数覆盖/恢复默认参数"→ 删除该文件。
 - 写完后重新 `eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"`，把即将生效的 `$MCCL_PERF_ARGS` 和覆盖键列表（`$MCCL_PERF_OVERRIDDEN_KEYS`）展示给用户确认一眼，再继续往下走。
 - 覆盖是**持久的**（跨轮保留，直到用户说清除）——这是有意设计；可见性由 tester 的 preflight 记录（`agents/mccl-tester.md` 第4节）和你收尾时的提示（第6节）保证。
 
 ## 1.6 加压测试触发判定
 
-场景E（加压测试）**仅按需触发**——不会在每次 /mccl-test 自动执行。判定规则：
+场景E（加压测试）和场景F（allgather 加压测试）**仅按需触发**——不会在每次 /mccl-test 自动执行。判定规则：
 
 - 用户在本次请求中提到"加压测试"/"stress test"/"场景E"（或主控认为用户意图包含加压测试）→ **触发场景E**
+- 用户在本次请求中提到"allgather 加压测试"/"场景F"（或主控认为用户意图包含 allgather 加压测试）→ **触发场景F**
 - 用户未提及 → **不触发**
 
-触发后，在调度 mccl-tester 的 prompt 里加"本次需跑场景E（加压测试）"。未触发时不加。
+触发后，在调度 mccl-tester 的 prompt 里加"本次需跑场景E（加压测试）"和/或"本次需跑场景F（allgather 加压测试）"。未触发时不加。
 
 ## 2. run 目录决定
 
@@ -72,14 +73,14 @@ git diff > "$RUN_DIR/change.patch"
 - **测试规模**：`$MCCL_NNODES`节点 × `$MCCL_GPUS_PER_NODE`卡、`-np $MCCL_NP`、拓扑判定（OAM32/OAM64/不支持）、`$MCCL_PERF_ARGS`实际展开值；`$MCCL_PERF_OVERRIDDEN_KEYS`非空时注明哪些键被覆盖。
 - **产物目录**：`$RUN_DIR`绝对路径。
 - **MD5基准**：基准文件`$MCCL_REMOTE_SRC/build/libmccl.so`的md5值（即"前置分发"里算出的那份，直接引用）与文件路径；注明这是`mccl-tester`独立核对的基准，不采信任何自报值。
-- **测试命令**：场景A、场景B两条mpirun命令的**完整展开**--`$MCCL_*`逐个替换为loader实际值（不凭记忆拼），场景B末尾带`-R 2`、场景A不带，模板见`agents/mccl-tester.md`第3节。若触发场景E（加压测试），追加场景E的完整展开命令。
+- **测试命令**：场景A、场景B两条mpirun命令的**完整展开**--`$MCCL_*`逐个替换为loader实际值（不凭记忆拼），场景B末尾带`-R 2`、场景A不带，模板见`agents/mccl-tester.md`第3节。若触发场景E（加压测试），追加场景E的完整展开命令；若触发场景F（allgather 加压测试），追加场景F的完整展开命令。
 
 各字段必须来自刚 `eval` 过的 loader 实际值与刚跑的 `md5sum` 输出，不得凭记忆或模板填。主控这步的md5核对只是**给用户看的预览**；`mccl-tester` 的独立核对（`agents/mccl-tester.md` 第4节）不变、仍是唯一判据。摘要输出后再进第4节调度。
 
 ## 4. 调度 mccl-tester（测试）
 
 `Task(mccl-tester)`：
-- prompt 里写清 run 目录绝对路径、产物写该目录：`test-preflight.md`、`test-asymmetric.log`、`test-symmetric.log`、`test-agather-asymmetric.log`、`test-agather-symmetric.log`、`test-result.md`、异常时 `[test-anomaly.md]`；若触发场景E（§1.6），追加"本次需跑场景E（加压测试）"，另写明日志 `test-stress.log`；若测试命中驱动 warm reset（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`），tester 会按 15 分钟间隔自动重试至多 5 次，重试日志为 `test-<场景>.retry-<k>.log`（`agents/mccl-tester.md` 第 5 节），这些文件一并供 reporter 参考。
+- prompt 里写清 run 目录绝对路径、产物写该目录：`test-preflight.md`、`test-asymmetric.log`、`test-symmetric.log`、`test-agather-asymmetric.log`、`test-agather-symmetric.log`、`test-result.md`、异常时 `[test-anomaly.md]`；若触发场景E（§1.6），追加"本次需跑场景E（加压测试）"，另写明日志 `test-stress.log`；若触发场景F（§1.6），追加"本次需跑场景F（allgather 加压测试）"，另写明日志 `test-stress-agather.log`；若测试命中驱动 warm reset（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`），tester 会按 15 分钟间隔自动重试至多 5 次，重试日志为 `test-<场景>.retry-<k>.log`（`agents/mccl-tester.md` 第 5 节），这些文件一并供 reporter 参考。
 - 目录里已有的 `change.patch` / `dev-change.md` / `build.log` 若存在就传给 tester 作参考；不存在就明确告诉它"无上一轮开发产物，md5 基准以构建产物 `$MCCL_REMOTE_SRC/build/libmccl.so` 为准，自行计算"。
 - `mccl-tester` 会独立核对各节点 `libmccl.so` md5（不采信任何自报值）、按 `$MCCL_NNODES` 选拓扑场景、跑 mpirun、落原始日志（`agents/mccl-tester.md`）。
 
@@ -89,7 +90,7 @@ git diff > "$RUN_DIR/change.patch"
 
 `Task(mccl-reporter)`：
 - prompt 里写清：
-  - 读 `$RUN_DIR/` 下的 `change.patch`、`test-preflight.md`、`test-asymmetric.log`/`test-symmetric.log`/`test-agather-asymmetric.log`/`test-agather-symmetric.log`/`test-stress.log`（如存在）、`test-result.md`、`[test-anomaly.md]`；`dev-change.md`/`build.log` 若存在也读。
+  - 读 `$RUN_DIR/` 下的 `change.patch`、`test-preflight.md`、`test-asymmetric.log`/`test-symmetric.log`/`test-agather-asymmetric.log`/`test-agather-symmetric.log`/`test-stress.log`/`test-stress-agather.log`（如存在）、`test-result.md`、`[test-anomaly.md]`；`dev-change.md`/`build.log` 若存在也读。
   - 写 `$RUN_DIR/report-1.md`（给完整文件名，别只给目录）。
 - `mccl-reporter` 无 Bash，只读产物转述，每个数字必有出处，未覆盖场景标"未覆盖"不推断（`agents/mccl-reporter.md`）。结论必须与 `test-result.md` 一致：测试 FAIL 就不能写"可以 commit"。
 

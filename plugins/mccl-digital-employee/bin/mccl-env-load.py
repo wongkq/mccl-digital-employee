@@ -92,6 +92,15 @@ OPTIONAL_RAW = [
     "MCCL_STRESS_R",
     "MCCL_STRESS_LAUNCH_NODE",
     "MCCL_STRESS_HOST_SPEC",
+    # 场景F（allgather 加压测试，仅按需触发；全不存在时不报错，派生量为空）
+    # 执行键 CHECK/OP/DTYPE/GPU_CHECK_ITERS 复用 MCCL_PERF_*；
+    # R/LAUNCH_NODE/HOST_SPEC 复用 MCCL_STRESS_*（与场景E 共享集群拓扑）。
+    "MCCL_AGATHER_STRESS_BIN",
+    "MCCL_AGATHER_STRESS_BEGIN",
+    "MCCL_AGATHER_STRESS_END",
+    "MCCL_AGATHER_STRESS_STEP",
+    "MCCL_AGATHER_STRESS_ITERS",
+    "MCCL_AGATHER_STRESS_WARMUP",
 ]
 
 # 必须是整数的 perf 键（用于拼 -f/-n/-w/-c/-G）
@@ -110,6 +119,9 @@ STRESS_INT_KEYS = [
     "MCCL_STRESS_ITERS",
     "MCCL_STRESS_WARMUP",
     "MCCL_STRESS_R",
+    "MCCL_AGATHER_STRESS_STEP",
+    "MCCL_AGATHER_STRESS_ITERS",
+    "MCCL_AGATHER_STRESS_WARMUP",
 ]
 
 OVERRIDE_FILENAME = "mccl-perf-override.json"
@@ -181,6 +193,25 @@ def derive(raw, overridden_keys):
         stress_perf_args = ""
         stress_launch_node = ""
         stress_host_spec = ""
+    # agather stress（场景F allgather 加压测试，可选）：6 个 MCCL_AGATHER_STRESS_* 键
+    # 全部存在时拼参数串；R/LAUNCH_NODE/HOST_SPEC 复用 MCCL_STRESS_*。
+    # 执行键 CHECK/OP/DTYPE/GPU_CHECK_ITERS 复用 MCCL_PERF_*，与 stress 一致。
+    # 使用 -i STEP 步进模式（替代 -f 倍乘因子）。
+    agather_stress_keys_present = all(k in raw for k in [
+        "MCCL_AGATHER_STRESS_BIN", "MCCL_AGATHER_STRESS_BEGIN",
+        "MCCL_AGATHER_STRESS_END", "MCCL_AGATHER_STRESS_STEP",
+        "MCCL_AGATHER_STRESS_ITERS", "MCCL_AGATHER_STRESS_WARMUP",
+    ])
+    if agather_stress_keys_present:
+        agather_stress_perf_args = (
+            "-b {MCCL_AGATHER_STRESS_BEGIN} -e {MCCL_AGATHER_STRESS_END} "
+            "-i {MCCL_AGATHER_STRESS_STEP} "
+            "-n {MCCL_AGATHER_STRESS_ITERS} -c {MCCL_PERF_CHECK} "
+            "-w {MCCL_AGATHER_STRESS_WARMUP} "
+            "-o {MCCL_PERF_OP} -d {MCCL_PERF_DTYPE} -G {MCCL_PERF_GPU_CHECK_ITERS}"
+        ).format(**{k: raw[k] for k in raw})
+    else:
+        agather_stress_perf_args = ""
     return {
         "MCCL_NODE0_IP": nodes[0],
         "MCCL_NNODES": len(nodes),
@@ -198,6 +229,7 @@ def derive(raw, overridden_keys):
         "MCCL_STRESS_PERF_ARGS": stress_perf_args,
         "MCCL_STRESS_LAUNCH_NODE": stress_launch_node,
         "MCCL_STRESS_HOST_SPEC": stress_host_spec,
+        "MCCL_AGATHER_STRESS_PERF_ARGS": agather_stress_perf_args,
     }
 
 
@@ -218,7 +250,7 @@ def apply_override(raw, json_path):
                 "mccl-env-load: {} 不是合法 JSON：{}\n".format(override_path, e)
             )
             sys.exit(1)
-    bad = [k for k in data if not k.startswith("MCCL_PERF_") and not k.startswith("MCCL_STRESS_")]
+    bad = [k for k in data if not k.startswith("MCCL_PERF_") and not k.startswith("MCCL_STRESS_") and not k.startswith("MCCL_AGATHER_STRESS_")]
     if bad:
         sys.stderr.write(
             "mccl-env-load: {} 只允许 MCCL_PERF_* / MCCL_STRESS_* 键，发现非法键：{}\n".format(

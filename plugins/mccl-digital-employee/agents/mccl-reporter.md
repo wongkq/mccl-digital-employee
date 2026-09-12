@@ -33,6 +33,8 @@ tools: Read, Grep, Glob, Write
 - `test-preflight.md`——执行前checklist六条核对
 - `test-asymmetric.log`（场景A）、`test-symmetric.log`（场景B）——原始mpirun输出（首次尝试）
 - `test-asymmetric.retry-<k>.log` / `test-symmetric.retry-<k>.log`——仅当测试命中驱动warm reset（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`）触发自动重试时存在，第`k`次重试的原始输出
+- `test-stress.log`——场景E（allreduce 加压）原始mpirun输出，如存在
+- `test-stress-agather.log`——场景F（allgather 加压）原始mpirun输出，如存在
 - `test-result.md`——每场景的命令、退出码、关键数据、PASS/FAIL判定（触发重试时含逐次尝试记录）
 - `test-anomaly.md`——仅在触发hang处置时存在
 
