@@ -60,6 +60,26 @@ eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 | 日志 | `test-asymmetric.log` | `test-symmetric.log` | `test-agather-asymmetric.log` | `test-agather-symmetric.log` |
 | 验证目标 | 传统FC clique的IPC路径（回归保护） | `mcclCommWindowRegister` → `MCCL_WIN_COLL_SYMMETRIC` → `registerSymetricBuffers`对称内存路径 | all_gather 传统 IPC 路径 | all_gather 对称内存路径 |
 
+### 场景E（allreduce 加压测试，仅按需触发）
+
+场景E是可选的加压测试，**仅当主控在调度 prompt 里明确指示"本次需跑场景E（加压测试）"时才执行**。/mccl-test 默认不跑场景E，即使配置存在也不跑——必须在调度 tester 的 prompt 中看到明确指示。
+
+| | 场景E（allreduce 加压） |
+|---|---|
+| 集体通信 | `all_reduce_perf` |
+| 二进制 | `$MCCL_STRESS_BIN` |
+| 压测参数 | `$MCCL_STRESS_PERF_ARGS`（使用 `-i` 步进模式，替代 `-f` 倍乘） |
+| 末尾参数 | `-R $MCCL_STRESS_R` |
+| 日志 | `test-stress.log` |
+| 验证目标 | 对称内存全尺寸范围加压 |
+| 执行位置 | `$MCCL_STRESS_LAUNCH_NODE`（如 53 节点，非 NODE0） |
+| Host Spec | `$MCCL_STRESS_HOST_SPEC`（可能含主机名，如 wangy-mccl） |
+
+**条件执行**：
+- 主控**指示跑**且 `$MCCL_STRESS_PERF_ARGS` 非空：跑场景E
+- 主控**指示跑**但 `$MCCL_STRESS_PERF_ARGS` 为空：在 `test-result.md` 注明"场景E：未配置 MCCL_STRESS_*，跳过"
+- 主控**未指示跑**：不跑，在 `test-result.md` 注明"场景E：未请求，跳过"
+
 场景A/C分别是两个集体（all_reduce/all_gather）在非对称内存模式下的回归保护，**均非可选项**。
 对称内存改动会碰到`registerSymetricBuffers`、`updateFcKernelCommonArgs`等两条路径共用的
 host代码，省掉任一非对称场景等于放弃对应集体的回归保护--即使本轮任务描述只提到其中一个
@@ -89,6 +109,27 @@ $MCCL_MPIRUN --allow-run-as-root -np $MCCL_NP \
 - 场景C：`<二进制>` = `$MCCL_AGATHER_BIN_ASYM`，`<压测参数>` = `$MCCL_AGATHER_PERF_ARGS`，不加`-R 2`。
 - 场景D：`<二进制>` = `$MCCL_AGATHER_BIN_SYM`，`<压测参数>` = `$MCCL_AGATHER_PERF_ARGS`，末尾加`-R 2`。
 
+**场景E（加压测试，仅按需触发）**的 mpirun 命令与 A-D 有以下差异：
+
+```bash
+ssh $MCCL_SSH_OPTS root@$MCCL_STRESS_LAUNCH_NODE \
+  "$MCCL_MPIRUN --allow-run-as-root -np $MCCL_NP \
+   -mca pml ^ucx -mca osc ^ucx -mca btl ^openib \
+   -mca btl_tcp_if_include $MCCL_TCP_IF_INCLUDE \
+   -host $MCCL_STRESS_HOST_SPEC \
+   -x MCCL_PCIE_BUFFER_MODE=1 -x MCCL_ENABLE_FC=1 -x MCCL_P2P_LEVEL=PXB \
+   -x LD_LIBRARY_PATH=$MCCL_LD_LIBRARY_PATH \
+   $MCCL_STRESS_BIN $MCCL_STRESS_PERF_ARGS -R $MCCL_STRESS_R" \
+  > "<run目录>/test-stress.log" 2>&1 &
+```
+
+差异点：
+- 发起节点为 `$MCCL_STRESS_LAUNCH_NODE`（不是 `$MCCL_NODE0_IP`）——加压测试可能从非 NODE0 节点发起
+- Host Spec 为 `$MCCL_STRESS_HOST_SPEC`（不是 `$MCCL_HOST_SPEC`）——可能含主机名（如 wangy-mccl）
+- 使用 `-i STEP` 步进模式（不是 `-f FACTOR` 倍乘）——`$MCCL_STRESS_PERF_ARGS` 里是 `-i` 不是 `-f`
+- 末尾加 `-R $MCCL_STRESS_R`（默认 2，对称内存开关）
+- hang 处置、自动重试与 A-D 共用同一套规程（第5节），日志桩名为 `stress`，重试日志为 `test-stress.retry-<k>.log`
+
 **压测参数不写死在这条命令里**：`$MCCL_PERF_ARGS`由 loader 从`mccl-env.json`的 9 个
 `MCCL_PERF_*`键拼出（`-b/-e/-f/-n/-c/-w/-o/-d/-G`），`$MCCL_AGATHER_PERF_ARGS`由 5 个
 `MCCL_AGATHER_*`键+6 个共享执行键拼出（尺寸档 `-b $MCCL_AGATHER_BEGIN -e $MCCL_AGATHER_END
@@ -114,6 +155,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 - [ ] `MCCL_P2P_LEVEL`和`MCCL_PCIE_BUFFER_MODE`已配置——核对`-x`参数里`MCCL_P2P_LEVEL=PXB`、`MCCL_PCIE_BUFFER_MODE=1`均出现。
 - [ ] `btl_tcp_if_include`为`$MCCL_TCP_IF_INCLUDE`——核对命令里该值逐字等于该变量。
 - [ ] 场景A、场景B、场景C、场景D命令均已就绪——核对四条命令的二进制路径可执行（`test -x`），且分别正确带/不带`-R 2`（A/C 不带、B/D 带）。
+- [ ] 场景E（加压测试）命令状态——若主控指示跑场景E：核对`$MCCL_STRESS_PERF_ARGS`非空、`$MCCL_STRESS_BIN`可执行、`$MCCL_STRESS_LAUNCH_NODE`可达（ssh 试探一次）；若未指示跑场景E：跳过本条，在 test-result.md 注明"场景E：未请求，跳过"。
 - [ ] 压测参数与覆盖状态已记录——把`$MCCL_PERF_ARGS`与`$MCCL_AGATHER_PERF_ARGS`的实际展开值逐字写进`test-preflight.md`；`$MCCL_PERF_OVERRIDDEN_KEYS`非空时，**逐键列出哪些值来自`mccl-perf-override.json`覆盖**（键名+覆盖后的值），为空则写明"无覆盖，全部为`mccl-env.json`默认值"。这条不是可选项：覆盖是持久的，不记录就会让后续测试在改了参数的情况下跑出看似可对比的数据。
 
 `libmccl.so`的分发由开发做、由测试独立核对——**这道交叉验证是故意的**。`MACA_PATH`用错版本会导致`mcMemFabricHandle_t`是80字节stub、跨节点句柄直接异常，值得两个角色分别做和查。checklist任何一条不通过，停止，不得跑mpirun，把未通过项写清楚后上报。
@@ -188,18 +230,20 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 - `test-symmetric.log`：场景B（all_reduce 对称）mpirun的完整原始输出，不摘要。
 - `test-agather-asymmetric.log`：场景C（all_gather 非对称）mpirun的完整原始输出，不摘要。
 - `test-agather-symmetric.log`：场景D（all_gather 对称）mpirun的完整原始输出，不摘要。
-- `test-<场景>.retry-<k>.log`（`<场景>`=asymmetric/symmetric/agather-asymmetric/agather-symmetric）：仅当触发自动重试（第5节：hang或驱动warm reset）时存在，第`k`次重试的完整原始输出，同样不摘要。
+- `test-stress.log`：场景E（allreduce 加压）mpirun的完整原始输出，不摘要。仅当主控指示跑场景E时产出。
+- `test-<场景>.retry-<k>.log`（`<场景>`=asymmetric/symmetric/agather-asymmetric/agather-symmetric/stress）：仅当触发自动重试（第5节：hang或驱动warm reset）时存在，第`k`次重试的完整原始输出，同样不摘要。
 - `test-anomaly.md`：仅在触发第5节hang处置时产出；同一场景每次hang**追加**一节（标注第几次尝试），含dmesg/IB原始输出与终止hang进程的kill审计（节点、PID、信号、结果逐条）。
 - `test-result.md`：每个场景一段，包含：
-  - 实际执行的完整mpirun命令（二进制、该场景压测参数实际展开值——场景A/B为`$MCCL_PERF_ARGS`、场景C/D为`$MCCL_AGATHER_PERF_ARGS`、是否带`-R 2`均如实写出）
+  - 实际执行的完整mpirun命令（二进制、该场景压测参数实际展开值——场景A/B为`$MCCL_PERF_ARGS`、场景C/D为`$MCCL_AGATHER_PERF_ARGS`、场景E为`$MCCL_STRESS_PERF_ARGS`、是否带`-R 2`/`-R $MCCL_STRESS_R`均如实写出）
   - 退出码
   - 关键数据（带宽/延迟等perf输出中的核心数字）
   - PASS/FAIL判定：退出码非0、日志中出现已知故障模式关键字（segfault、UDS refused等）、或perf二进制自身报告的正确性校验失败，均判FAIL；否则PASS。
   - 若触发过自动重试（第5节：hang或驱动warm reset），逐次列出每次尝试的发起时间、结束方式（正常退出/判hang终止）、退出码、命中特征与日志文件名，并写明最终判定依据哪一次
   - 若命中第6节已知故障模式，注明是哪一类
+  - 场景E若未跑，注明原因（"未请求"或"未配置 MCCL_STRESS_*"）
 
 拓扑不支持（`$MCCL_NNODES`不是4/8，或`$MCCL_GPUS_PER_NODE`不是8）：
 
 - `test-preflight.md`：写明`$MCCL_NNODES`、`$MCCL_GPUS_PER_NODE`的实际值、为什么判定为不支持的拓扑（见第2节），不产出`test-result.md`，直接上报。
 
-`test-result.md`是判断本轮测试是否达标的唯一依据，写清楚、写完整，不留"跑了但结果不明"的空白。四个场景各自独立判定；整轮结论取所有场景最差--任一场景FAIL（含重试耗尽后放弃的），整轮即FAIL，报告与上报口径以此为准。
+`test-result.md`是判断本轮测试是否达标的唯一依据，写清楚、写完整，不留"跑了但结果不明"的空白。四个场景各自独立判定；场景E若执行也独立判定。整轮结论取所有已执行场景最差--任一场景FAIL（含重试耗尽后放弃的），整轮即FAIL，报告与上报口径以此为准。

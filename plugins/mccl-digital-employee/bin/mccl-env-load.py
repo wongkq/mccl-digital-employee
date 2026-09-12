@@ -81,6 +81,19 @@ REQUIRED_RAW = [
     "MCCL_AGATHER_FACTOR",
 ]
 
+# 可选的 raw 键（场景E 加压测试，仅按需触发；全不存在时不报错，派生量为空）
+OPTIONAL_RAW = [
+    "MCCL_STRESS_BIN",
+    "MCCL_STRESS_BEGIN",
+    "MCCL_STRESS_END",
+    "MCCL_STRESS_STEP",
+    "MCCL_STRESS_ITERS",
+    "MCCL_STRESS_WARMUP",
+    "MCCL_STRESS_R",
+    "MCCL_STRESS_LAUNCH_NODE",
+    "MCCL_STRESS_HOST_SPEC",
+]
+
 # 必须是整数的 perf 键（用于拼 -f/-n/-w/-c/-G）
 PERF_INT_KEYS = [
     "MCCL_PERF_FACTOR",
@@ -89,6 +102,14 @@ PERF_INT_KEYS = [
     "MCCL_PERF_CHECK",
     "MCCL_PERF_GPU_CHECK_ITERS",
     "MCCL_AGATHER_FACTOR",
+]
+
+# 可选键中必须是整数的 stress 键（用于拼 -i/-n/-w/-R）
+STRESS_INT_KEYS = [
+    "MCCL_STRESS_STEP",
+    "MCCL_STRESS_ITERS",
+    "MCCL_STRESS_WARMUP",
+    "MCCL_STRESS_R",
 ]
 
 OVERRIDE_FILENAME = "mccl-perf-override.json"
@@ -140,6 +161,26 @@ def derive(raw, overridden_keys):
         "-n {MCCL_PERF_ITERS} -c {MCCL_PERF_CHECK} -w {MCCL_PERF_WARMUP} "
         "-o {MCCL_PERF_OP} -d {MCCL_PERF_DTYPE} -G {MCCL_PERF_GPU_CHECK_ITERS}"
     ).format(**{k: raw[k] for k in raw})
+    # stress（场景E 加压测试，可选）：全部 MCCL_STRESS_* 键存在时拼参数串；
+    # 执行键 CHECK/OP/DTYPE/GPU_CHECK_ITERS 复用 MCCL_PERF_*，与 agather 一致。
+    # 使用 -i STEP 步进模式（替代 -f 倍乘因子）。
+    stress_keys_present = all(k in raw for k in [
+        "MCCL_STRESS_BIN", "MCCL_STRESS_BEGIN", "MCCL_STRESS_END",
+        "MCCL_STRESS_STEP", "MCCL_STRESS_ITERS", "MCCL_STRESS_WARMUP",
+        "MCCL_STRESS_R", "MCCL_STRESS_LAUNCH_NODE", "MCCL_STRESS_HOST_SPEC",
+    ])
+    if stress_keys_present:
+        stress_perf_args = (
+            "-b {MCCL_STRESS_BEGIN} -e {MCCL_STRESS_END} -i {MCCL_STRESS_STEP} "
+            "-n {MCCL_STRESS_ITERS} -c {MCCL_PERF_CHECK} -w {MCCL_STRESS_WARMUP} "
+            "-o {MCCL_PERF_OP} -d {MCCL_PERF_DTYPE} -G {MCCL_PERF_GPU_CHECK_ITERS}"
+        ).format(**{k: raw[k] for k in raw})
+        stress_launch_node = str(raw["MCCL_STRESS_LAUNCH_NODE"])
+        stress_host_spec = str(raw["MCCL_STRESS_HOST_SPEC"])
+    else:
+        stress_perf_args = ""
+        stress_launch_node = ""
+        stress_host_spec = ""
     return {
         "MCCL_NODE0_IP": nodes[0],
         "MCCL_NNODES": len(nodes),
@@ -154,14 +195,17 @@ def derive(raw, overridden_keys):
         "MCCL_PERF_ARGS": perf_args,
         "MCCL_AGATHER_PERF_ARGS": agather_args,
         "MCCL_PERF_OVERRIDDEN_KEYS": " ".join(sorted(overridden_keys)),
+        "MCCL_STRESS_PERF_ARGS": stress_perf_args,
+        "MCCL_STRESS_LAUNCH_NODE": stress_launch_node,
+        "MCCL_STRESS_HOST_SPEC": stress_host_spec,
     }
 
 
 def apply_override(raw, json_path):
-    """读 json 同目录的 mccl-perf-override.json，覆盖其中的 MCCL_PERF_* 键。
+    """读 json 同目录的 mccl-perf-override.json，覆盖其中的 MCCL_PERF_* / MCCL_STRESS_* 键。
 
-    返回被覆盖的键名集合。文件不存在=无覆盖；存在但含非 MCCL_PERF_ 开头的键
-    则报错退出（写错键名静默不生效比报错更危险）。
+    返回被覆盖的键名集合。文件不存在=无覆盖；存在但含非 MCCL_PERF_ / MCCL_STRESS_
+    开头的键则报错退出（写错键名静默不生效比报错更危险）。
     """
     override_path = os.path.join(os.path.dirname(json_path), OVERRIDE_FILENAME)
     if not os.path.isfile(override_path):
@@ -174,18 +218,19 @@ def apply_override(raw, json_path):
                 "mccl-env-load: {} 不是合法 JSON：{}\n".format(override_path, e)
             )
             sys.exit(1)
-    bad = [k for k in data if not k.startswith("MCCL_PERF_")]
+    bad = [k for k in data if not k.startswith("MCCL_PERF_") and not k.startswith("MCCL_STRESS_")]
     if bad:
         sys.stderr.write(
-            "mccl-env-load: {} 只允许 MCCL_PERF_* 键，发现非法键：{}\n".format(
+            "mccl-env-load: {} 只允许 MCCL_PERF_* / MCCL_STRESS_* 键，发现非法键：{}\n".format(
                 override_path, ", ".join(sorted(bad))
             )
         )
         sys.exit(1)
-    unknown = [k for k in data if k not in REQUIRED_RAW]
+    all_known = REQUIRED_RAW + OPTIONAL_RAW
+    unknown = [k for k in data if k not in all_known]
     if unknown:
         sys.stderr.write(
-            "mccl-env-load: {} 含未知 perf 键：{}（合法键见 mccl-env.json.example）\n".format(
+            "mccl-env-load: {} 含未知键：{}（合法键见 mccl-env.json.example）\n".format(
                 override_path, ", ".join(sorted(unknown))
             )
         )
@@ -196,7 +241,7 @@ def apply_override(raw, json_path):
 
 
 def validate(raw, path):
-    """缺键/非整数键报错退出。"""
+    """缺键/非整数键报错退出。可选键存在时校验整数，不存在则跳过。"""
     missing = [k for k in REQUIRED_RAW if k not in raw]
     if missing:
         sys.stderr.write(
@@ -211,6 +256,16 @@ def validate(raw, path):
                 "mccl-env-load: {} 必须是整数，当前值：{!r}\n".format(k, raw[k])
             )
             sys.exit(1)
+    # 可选 stress 键：存在时校验整数，不存在则跳过
+    for k in STRESS_INT_KEYS:
+        if k in raw:
+            try:
+                int(raw[k])
+            except (TypeError, ValueError):
+                sys.stderr.write(
+                    "mccl-env-load: {} 必须是整数，当前值：{!r}\n".format(k, raw[k])
+                )
+                sys.exit(1)
 
 
 def main():

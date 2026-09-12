@@ -18,7 +18,8 @@
     "agather": "MCCL_AGATHER_*（场景C/D，all_gather_perf 的 5 个键）：BIN_ASYM/BIN_SYM 为 all_gather 二进制的非对称/对称路径；BEGIN/END 为尺寸档起止（-b/-e，建议 8M/512M），FACTOR=尺寸倍乘因子（-f，2，整数）。loader 拼成 MCCL_AGATHER_PERF_ARGS；执行键 ITERS/WARMUP/CHECK/OP/DTYPE/GPU_CHECK_ITERS 复用上方的 MCCL_PERF_*（不必重复填）。尺寸档 8M..512M ×2 = 8,16,32,64,128,256,512MB 共 7 档。",
     "ld_library_path": "MCCL_LD_LIBRARY_PATH（loader 派生 = MCCL_MACA_LIB_DIR:MCCL_OMPI_LIB_PATH）：多节点 mpirun 经 -x 注入。MCCL_OMPI_LIB_PATH 是 libmpi.so 所在目录。",
     "tcp_if": "MCCL_TCP_IF_INCLUDE：MPI TCP 网段 CIDR（多节点 btl_tcp_if_include 用）。",
-    "ssh_opts": "MCCL_SSH_OPTS：所有 ssh/scp 必须带这组选项。BatchMode=yes 让密钥没配好时立刻失败而不是弹密码提示卡死。一般不需改。"
+    "ssh_opts": "MCCL_SSH_OPTS：所有 ssh/scp 必须带这组选项。BatchMode=yes 让密钥没配好时立刻失败而不是弹密码提示卡死。一般不需改。",
+    "stress": "MCCL_STRESS_*（场景E，4节点 allreduce 加压测试，可选且仅按需触发）：用户明确说'跑加压测试'时才跑，/mccl-test 默认不跑。8 个键：BIN=all_reduce_perf 二进制路径，BEGIN/END=消息尺寸起止（-b/-e），STEP=步进字节数（-i，替代 -f 倍乘因子），ITERS=每尺寸正式迭代次数（-n），WARMUP=预热次数（-w），R=对称内存开关（-R，如 2）。执行键 CHECK/OP/DTYPE/GPU_CHECK_ITERS 复用上方的 MCCL_PERF_*（不必重复填）。LAUNCH_NODE=mpirun 发起节点（与标准场景的 NODE0 不同，加压测试可从其他节点发起），HOST_SPEC=mpirun -host 参数值（与 MCCL_HOST_SPEC 独立，因为加压场景可能从不同节点发起、需用不同主机名解析，如 58 用 wangy-mccl 主机名）。这些键全部不存在时 loader 不报错、tester 不跑场景E。STEP/ITERS/WARMUP/R 必须是整数，否则 loader 报错。loader 拼成 MCCL_STRESS_PERF_ARGS='-b BEGIN -e END -i STEP -n ITERS -c CHECK -w WARMUP -o OP -d DTYPE -G GPU_CHECK_ITERS'（CHECK/OP/DTYPE/GPU_CHECK_ITERS 从 MCCL_PERF_* 取值）。"
   },
   "MCCL_NODES": "<node0-ip> <node1-ip> <node2-ip> <node3-ip>",
   "MCCL_GPUS_PER_NODE": 8,
@@ -48,5 +49,14 @@
   "MCCL_AGATHER_BIN_SYM": "<all_gather_perf 路径>",
   "MCCL_AGATHER_BEGIN": "8M",
   "MCCL_AGATHER_END": "512M",
-  "MCCL_AGATHER_FACTOR": 2
+  "MCCL_AGATHER_FACTOR": 2,
+  "MCCL_STRESS_BIN": "<stress-perf-binary>",
+  "MCCL_STRESS_BEGIN": "2K",
+  "MCCL_STRESS_END": "512M",
+  "MCCL_STRESS_STEP": 1024,
+  "MCCL_STRESS_ITERS": 200,
+  "MCCL_STRESS_WARMUP": 20,
+  "MCCL_STRESS_R": 2,
+  "MCCL_STRESS_LAUNCH_NODE": "<stress-launch-node-ip>",
+  "MCCL_STRESS_HOST_SPEC": "<ip>:8,<hostname>:8,<ip>:8,<ip>:8"
 }
