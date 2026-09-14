@@ -190,8 +190,8 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 
 跑任何mpirun之前，逐条核对，记入`test-preflight.md`（每条标注核对方式与结果）。**首部先写"执行摘要"六字段**：执行时间（本轮发起时刻）、前置分发（各节点`libmccl.so`的md5核对结果，来自下方第2条）、测试规模（`$MCCL_NNODES`节点 × `$MCCL_GPUS_PER_NODE`卡、`-np $MCCL_NP`、拓扑判定、`$MCCL_PERF_ARGS`实际展开值及覆盖状态）、产物目录（本轮run目录绝对路径）、MD5基准（基准文件`$MCCL_REMOTE_SRC/build/libmccl.so`的md5值与路径）、测试命令（场景A/B两条mpirun命令完整展开）。摘要字段用你本轮实际核对出的值，不用主控预览值。**随后写清楚本轮`$MCCL_NNODES`的值与判定的模式（OAM32/OAM64/不支持）**，再走下面的子表。
 
-- [ ] IP仅限`$MCCL_NODES`列表里的节点——检查本轮将要执行的所有ssh/scp/mpirun命令里出现的IP，逐个比对`$MCCL_NODES`的值，不得出现列表之外的第五个IP（或第九个，8节点时）。
-- [ ] `libmccl.so`全部节点均已更新——**独立核对md5，不采信`dev-change.md`里开发写的md5声明**。做法：经`$MCCL_NODE0_IP`跳板，对`$MCCL_NODES`里每一个节点（**含编译节点**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（宿主机层，即`$MCCL_LD_LIBRARY_PATH`的库目录部分，容器模式下不是容器内`$MCCL_VENDOR_MACA_PATH/lib`那份）分别`md5sum`，同时对`$MCCL_NODE0_IP`上（容器模式在容器内、无容器模式在宿主机）`$MCCL_REMOTE_SRC/build/libmccl.so`构建产物也`md5sum`一份作为基准，共`$MCCL_NNODES + 1`个结果必须完全一致。任何一个不一致，本条判FAIL，不得继续跑测试，直接上报——**包括编译节点那一份**：编译节点虽然是编译节点，但产物停在`build/`里，需要一次单独的分发动作才会进`$MCCL_MACA_LIB_DIR`（容器模式经`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第3节动作②的`docker exec`cp，无容器模式经合并后的直接`cp`），不能因为"库本来就是这台机器编的"就默认它已经到位。
+- [ ] 寻址仅限`$MCCL_NODE_ADDRS`列表里的节点（含别名主机名）——检查本轮将要执行的所有ssh/scp/mpirun命令里出现的IP/主机名，逐个比对`$MCCL_NODE_ADDRS`的值，不得出现列表之外的地址（如第5个、第9个，8节点时）。直连不可达的节点用别名（如节点58的`wangy-mccl`），属允许。
+- [ ] `libmccl.so`全部节点均已更新——**独立核对md5，不采信`dev-change.md`里开发写的md5声明**。做法：经`$MCCL_NODE0_IP`跳板，对`$MCCL_NODE_ADDRS`里每一个地址（**含第一个，即`$MCCL_NODE0_IP`**）上mpirun实际会加载的那份`$MCCL_MACA_LIB_DIR/libmccl.so`（宿主机层，即`$MCCL_LD_LIBRARY_PATH`的库目录部分，容器模式下不是容器内`$MCCL_VENDOR_MACA_PATH/lib`那份）分别`md5sum`，同时对`$MCCL_NODE0_IP`上（容器模式在容器内、无容器模式在宿主机）`$MCCL_REMOTE_SRC/build/libmccl.so`构建产物也`md5sum`一份作为基准，共`$MCCL_NNODES + 1`个结果必须完全一致。**任何不一致，先重新分发再复测，不要直接判FAIL**：以**节点列表第一个节点（`$MCCL_NODE0_IP`）上的构建产物`$MCCL_REMOTE_SRC/build/libmccl.so`**为唯一权威源（与是否编译节点无关，纯粹"从第一个节点分发到各节点"），按`$TOOLKIT_ROOT/references/mccl-remote-ops.md`第3节动作②分发到`$MCCL_NODE_ADDRS`各地址的`$MCCL_MACA_LIB_DIR`——**含第一个地址自身**：构建产物停在`build/`里、不会自动进lib目录，第一个地址（`$MCCL_NODE0_IP`）也需要一次单独分发才会到位（**直接在宿主机层`cp`，不走容器**，用户约定）；其余地址从第一个节点宿主机层`scp`（直连不可达的，如节点58，scp到别名`wangy-mccl`）。随后对`$MCCL_NODE_ADDRS`整份（仍然共`$MCCL_NNODES + 1`份）重新`md5sum`一遍。重新分发后若**全部一致**，本条判PASS、继续；若**仍不一致**，才判FAIL、不得继续跑测试、直接上报。**重分发用的是已编译产物，不是重新编译**——不得动源码、不得触发`make`。
 - [ ] `-np`等于`$MCCL_NP`，`-host`逐字等于`$MCCL_HOST_SPEC`——核对方式：命令里的`-np`值等于`$MCCL_NP`（4节点应为32，8节点应为64），`-host`值逐字等于`$MCCL_HOST_SPEC`。
 - [ ] `MCCL_P2P_LEVEL`和`MCCL_PCIE_BUFFER_MODE`已配置——核对`-x`参数里`MCCL_P2P_LEVEL=PXB`、`MCCL_PCIE_BUFFER_MODE=1`均出现。
 - [ ] `btl_tcp_if_include`为`$MCCL_TCP_IF_INCLUDE`——核对命令里该值逐字等于该变量。
@@ -200,11 +200,11 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 - [ ] 场景F（allgather 加压测试）命令状态——若主控指示跑场景F：核对`$MCCL_AGATHER_STRESS_PERF_ARGS`非空、`$MCCL_AGATHER_STRESS_BIN`可执行、`$MCCL_STRESS_LAUNCH_NODE`可达（与场景E 共用，若场景E 已核对则免核）；若未指示跑场景F：跳过本条，在 test-result.md 注明"场景F：未请求，跳过"。
 - [ ] 压测参数与覆盖状态已记录——把`$MCCL_PERF_ARGS`与`$MCCL_AGATHER_PERF_ARGS`的实际展开值逐字写进`test-preflight.md`；`$MCCL_PERF_OVERRIDDEN_KEYS`非空时，**逐键列出哪些值来自`mccl-perf-override.json`覆盖**（键名+覆盖后的值），为空则写明"无覆盖，全部为`mccl-env.json`默认值"。这条不是可选项：覆盖是持久的，不记录就会让后续测试在改了参数的情况下跑出看似可对比的数据。
 
-`libmccl.so`的分发由开发做、由测试独立核对——**这道交叉验证是故意的**。`MACA_PATH`用错版本会导致`mcMemFabricHandle_t`是80字节stub、跨节点句柄直接异常，值得两个角色分别做和查。checklist任何一条不通过，停止，不得跑mpirun，把未通过项写清楚后上报。
+`libmccl.so`的分发由开发做、由测试独立核对——**这道交叉验证是故意的**。`MACA_PATH`用错版本会导致`mcMemFabricHandle_t`是80字节stub、跨节点句柄直接异常，值得两个角色分别做和查。**用户授权（本轮起生效）：md5不一致时的重分发改由测试执行**——以**节点列表第一个节点（`$MCCL_NODE0_IP`）的构建产物`$MCCL_REMOTE_SRC/build/libmccl.so`**为源，按`references/mccl-remote-ops.md`第3节动作②分发到`$MCCL_NODE_ADDRS`各地址后再复测（与"编译节点"概念无关，只是从第一个节点分发到各节点；复制产物不是改库、不是重编译）。核对通过则继续，重新分发后仍不一致才停止上报。checklist其他任何一条不通过，停止，不得跑mpirun，把未通过项写清楚后上报。
 
 ## 5. 硬约束（逐字，违反即ABORT或REWORK）
 
-- 不改代码、不改库、不重新编译。发现问题只能上报。
+- 不改代码、不改库、不重新编译。**唯一例外（用户授权）：`libmccl.so` md5不一致这一个场景**，允许以节点列表第一个节点（`$MCCL_NODE0_IP`）的构建产物`$MCCL_REMOTE_SRC/build/libmccl.so`为源，按`references/mccl-remote-ops.md`第3节动作②分发到各节点后再复测；这只是把已编译好的产物复制到位，不是改库、不是重编译。除此之外的问题，只能上报。
 - **mpirun hang（判定见本节）：禁止重启节点。** 先采集`dmesg`和IB状态落盘`test-anomaly.md`，再终止hang的本场景测试进程，然后按本节自动重试规程以15分钟间隔重试至多5次；额度耗尽该场景判FAIL、转下一场景。重启节点在任何分支都禁止（`references/mccl-safety.md`第3条，无例外）。
 - 不对远程环境做破坏性操作。
 - 日志必须是原始输出，不得摘要后落盘。
@@ -228,7 +228,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "<上面的mpirun命令，$MCCL_*已在�
 3. 判定hang后，按顺序执行以下三步，顺序不许颠倒：
 
    **第一步：采证（hang进程保持原样时做）**。另开一路（经`$MCCL_NODE0_IP`跳板）对相关节点采集`dmesg`（如`dmesg | tail -200`）和IB状态（如`ibstat`/`ibstatus`，视环境实际可用命令而定），把采集到的原始输出（不摘要）连同"哪个场景、第几次尝试、发起时间、判定hang的时间、当时的mpirun命令"写入`test-anomaly.md`。同一场景每次hang都**追加**一节，不覆盖--重试再次hang时现场可能不同，逐次留痕。
-   **第二步：终止hang进程**。证据落盘后才允许动手。经`$MCCL_NODE0_IP`跳板，对`$MCCL_NODES`里每个节点上属于本场景的测试进程（`mpirun`/`orted`/`all_reduce_perf`/`all_gather_perf`，仅限本轮发起的）先`kill -15`；10秒后仍存活的再`kill -9`。PID≤1与非本场景的进程（其他用户的、常驻守护）一律不碰。每次kill（节点、PID、信号、结果）逐条记入`test-anomaly.md`对应hang小节--这是审计记录，不是可选项。终止后复查各节点已无残留的`all_reduce_perf`/`all_gather_perf`，再进入等待。
+   **第二步：终止hang进程**。证据落盘后才允许动手。经`$MCCL_NODE0_IP`跳板，对`$MCCL_NODE_ADDRS`里每个地址上属于本场景的测试进程（`mpirun`/`orted`/`all_reduce_perf`/`all_gather_perf`，仅限本轮发起的）先`kill -15`；10秒后仍存活的再`kill -9`。PID≤1与非本场景的进程（其他用户的、常驻守护）一律不碰。每次kill（地址、PID、信号、结果）逐条记入`test-anomaly.md`对应hang小节--这是审计记录，不是可选项。终止后复查各地址已无残留的`all_reduce_perf`/`all_gather_perf`，再进入等待。
    **第三步：进入自动重试规程**（下一条）：该次尝试判FAIL，等15分钟后重新执行同一命令；重试再次hang则回到第一步，采证与终止每轮都做。
 4. 除上述三步列出的动作外，不得对hang的进程或所在节点做任何其他操作。终止hang进程是`mccl-tester`被允许的唯一一类kill动作（定时任务调度链路的GPU占用清理是另一回事，见`references/mccl-safety.md`第9条，与你无关）；重启节点则是全程无例外的禁令，不是"先重试一次看看"。
 

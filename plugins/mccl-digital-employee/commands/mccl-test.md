@@ -1,13 +1,13 @@
 ---
 name: mccl-test
-description: 测试+报告一条龙：调 mccl-tester 按拓扑（OAM32/OAM64）跑场景A/B测试，再调 mccl-reporter 写验证报告。支持自然语言临时覆盖压测参数（写入 mccl-perf-override.json）。独立核对 libmccl.so 各节点 md5。不改代码、不重新编译、不分发库。适用"库已编译分发好、想测试+出报告"的场景。自然语言触发：测试/复测/跑一遍测试/回归验证（未要求改代码时）。
+description: 测试+报告一条龙：调 mccl-tester 按拓扑（OAM32/OAM64）跑场景A/B测试，再调 mccl-reporter 写验证报告。支持自然语言临时覆盖压测参数（写入 mccl-perf-override.json）。独立核对 libmccl.so 各节点 md5，不一致时先重新分发已编译的构建产物再测。不改代码、不重新编译。适用"库已编译好、想测试+出报告"的场景。自然语言触发：测试/复测/跑一遍测试/回归验证（未要求改代码时）。
 ---
 
 你是 MCCL **测试+报告**主控（`/mccl-test`）。用户输入：`/mccl-test [<run目录>]`。
 
 ## 0. 主控纪律
 
-测试的前提是"库已编译好、已分发好"--那是开发阶段（改码/编译/分发）或其他流程已经做完的事，本命令不做。你要做的只有：
+测试的前提是"库已编译好、已分发好"--那是开发阶段（改码/编译/分发）或其他流程已经做完的事，本命令不做。**唯一例外（用户授权）：md5核验不一致时，重新分发已编译的构建产物**（`references/mccl-remote-ops.md`第3节动作②，以节点列表第一个节点`$MCCL_NODE0_IP`上的构建产物`$MCCL_REMOTE_SRC/build/libmccl.so`为源，分发到`$MCCL_NODE_ADDRS`各地址的`$MCCL_MACA_LIB_DIR`；第一个节点宿主机层直接`cp`、**不走容器**，其余地址从第一个节点`scp`）是本命令可做的事——它只是复制产物，不是改码/重编译。你要做的只有：
 
 - 生成 `change.patch`（`git diff`，供报告引用变更基准）
 - 调 `mccl-tester` 跑测试
@@ -69,7 +69,7 @@ git diff > "$RUN_DIR/change.patch"
 调度 `mccl-tester` 之前，向用户输出一块六字段执行摘要--这是用户下发任务后看到的第一屏，不必翻产物就知道这轮跑什么、基准是什么。六个字段一个不能少：
 
 - **执行时间**：`date '+%Y-%m-%d %H:%M:%S'` 的实际输出（本轮测试发起时刻）。
-- **前置分发**：经`$MCCL_NODE0_IP`跳板（`ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "..."`，宿主机层、只读）对`$MCCL_NODES`每个节点的`$MCCL_MACA_LIB_DIR/libmccl.so`与基准`$MCCL_REMOTE_SRC/build/libmccl.so`各做一次`md5sum`（共`$MCCL_NNODES + 1`份），逐份列出节点与md5；有任何不一致，在摘要里标出并注明"tester preflight 将判FAIL、本轮测试不会开跑"。
+- **前置分发**：经`$MCCL_NODE0_IP`跳板（`ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "..."`，宿主机层、只读）对`$MCCL_NODE_ADDRS`每个地址的`$MCCL_MACA_LIB_DIR/libmccl.so`与基准`$MCCL_REMOTE_SRC/build/libmccl.so`各做一次`md5sum`（共`$MCCL_NNODES + 1`份），逐份列出地址与md5；有任何不一致，在摘要里标出并注明"tester 将从节点列表第一个节点`$MCCL_NODE0_IP`分发构建产物到各地址、再复测 md5；若仍不一致才判 FAIL、本轮测试才不开跑"。
 - **测试规模**：`$MCCL_NNODES`节点 × `$MCCL_GPUS_PER_NODE`卡、`-np $MCCL_NP`、拓扑判定（OAM32/OAM64/不支持）、`$MCCL_PERF_ARGS`实际展开值；`$MCCL_PERF_OVERRIDDEN_KEYS`非空时注明哪些键被覆盖。
 - **产物目录**：`$RUN_DIR`绝对路径。
 - **MD5基准**：基准文件`$MCCL_REMOTE_SRC/build/libmccl.so`的md5值（即"前置分发"里算出的那份，直接引用）与文件路径；注明这是`mccl-tester`独立核对的基准，不采信任何自报值。
@@ -82,9 +82,9 @@ git diff > "$RUN_DIR/change.patch"
 `Task(mccl-tester)`：
 - prompt 里写清 run 目录绝对路径、产物写该目录：`test-preflight.md`、`test-asymmetric.log`、`test-symmetric.log`、`test-agather-asymmetric.log`、`test-agather-symmetric.log`、`test-result.md`、异常时 `[test-anomaly.md]`；若触发场景E（§1.6），追加"本次需跑场景E（加压测试）"，另写明日志 `test-stress.log`；若触发场景F（§1.6），追加"本次需跑场景F（allgather 加压测试）"，另写明日志 `test-stress-agather.log`；若测试命中驱动 warm reset（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`），tester 会按 15 分钟间隔自动重试至多 5 次，重试日志为 `test-<场景>.retry-<k>.log`（`agents/mccl-tester.md` 第 5 节），这些文件一并供 reporter 参考。
 - 目录里已有的 `change.patch` / `dev-change.md` / `build.log` 若存在就传给 tester 作参考；不存在就明确告诉它"无上一轮开发产物，md5 基准以构建产物 `$MCCL_REMOTE_SRC/build/libmccl.so` 为准，自行计算"。
-- `mccl-tester` 会独立核对各节点 `libmccl.so` md5（不采信任何自报值）、按 `$MCCL_NNODES` 选拓扑场景、跑 mpirun、落原始日志（`agents/mccl-tester.md`）。
+- `mccl-tester` 会独立核对各节点 `libmccl.so` md5（不采信任何自报值）、md5 不一致时先重新分发构建产物（`references/mccl-remote-ops.md`第3节动作②）再复测、按 `$MCCL_NNODES` 选拓扑场景、跑 mpirun、落原始日志（`agents/mccl-tester.md`）。
 
-测试完成后（无论 PASS/FAIL），`test-result.md` 必已落盘--进入第5节调 reporter 写报告。若 tester 因 md5 不一致/库未分发到位而停止，`test-result.md` 会记录该失败，reporter 据实写入报告，**不要跳过报告环节**，也不要自作主张去补编译--让用户看到"为什么没跑成"。
+测试完成后（无论 PASS/FAIL），`test-result.md` 必已落盘--进入第5节调 reporter 写报告。若 tester 因 md5 **重新分发后仍不一致**/其他失败而停止，`test-result.md` 会记录该失败，reporter 据实写入报告，**不要跳过报告环节**，也不要自作主张去补编译--让用户看到"为什么没跑成"。
 
 ## 5. 调度 mccl-reporter（写报告）
 
@@ -150,5 +150,5 @@ python3 "$TOOLKIT_ROOT/bin/mccl-data-report.py" --run-dir "$RUN_DIR" --goals "$R
 
 ## 7. 不做的事
 
-- **不自己改代码/编译/分发**--即使测试因为 md5 不一致、库没分发到位而失败，也如实上报并写进报告，让用户决定如何处理（重新开发+分发不在本命令范围），不要自作主张去补编译。
+- **不自己改代码/重编译**。md5 不一致时允许重新分发已编译的构建产物（`references/mccl-remote-ops.md`第3节动作②，复制产物、非改库）；重新分发后仍不一致（说明构建产物本身有问题），如实上报并写进报告，让用户决定如何处理——不要自作主张去补编译。
 - 不自动 commit / push。

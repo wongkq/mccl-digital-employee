@@ -20,7 +20,11 @@
     MCCL_NODE0_IP      = MCCL_NODES 的第一个词
     MCCL_NNODES        = MCCL_NODES 的词数
     MCCL_NP            = MCCL_NNODES * MCCL_GPUS_PER_NODE
-    MCCL_HOST_SPEC     = "ip:gpus,ip:gpus,..."
+    MCCL_HOST_SPEC     = "addr:gpus,addr:gpus,..."，addr 对每个节点取
+                         MCCL_NODE_ALIASES（{IP:主机名}）的别名，无别名则用 IP 原值。
+                         用于 mpirun -host 与一切对节点的远程寻址（ssh/scp/md5/kill）。
+    MCCL_NODE_ADDRS    = 空格分隔的地址列表（与 MCCL_NODES 同序），用别名替换直连不可达
+                         节点（如节点58 -> wangy-mccl）；无别名时等于 MCCL_NODES。
     MCCL_REMOTE_SRC    = MCCL_REMOTE_WORKDIR + "/" + MCCL_REMOTE_SRC_REPO_NAME
     MCCL_LD_LIBRARY_PATH = MCCL_MACA_LIB_DIR + ":" + MCCL_OMPI_LIB_PATH
     MCCL_PERF_ARGS     = 由 9 个 MCCL_PERF_* raw 键拼出的 all_reduce_perf 参数串
@@ -101,6 +105,10 @@ OPTIONAL_RAW = [
     "MCCL_AGATHER_STRESS_STEP",
     "MCCL_AGATHER_STRESS_ITERS",
     "MCCL_AGATHER_STRESS_WARMUP",
+    # 节点别名映射（{IP: 主机名}，可选出）。用于把直连不可达的节点（宿主机不能直接访问、
+    # 需经 ssh 到主机别名/容器的，如节点58 -> wangy-mccl）换成宿主机名，统一在
+    # mpirun -host / ssh / scp / md5 / kill 里寻址。缺省不做替换，行为等同无别名。
+    "MCCL_NODE_ALIASES",
 ]
 
 # 必须是整数的 perf 键（用于拼 -f/-n/-w/-c/-G）
@@ -161,6 +169,12 @@ def derive(raw, overridden_keys):
     """从 raw 键算派生量。"""
     nodes = str(raw["MCCL_NODES"]).split()
     gpus = int(raw["MCCL_GPUS_PER_NODE"])
+    # 节点别名：MCCL_NODE_ALIASES = {IP: 主机名}，把直连不可达的节点（如节点58 ->
+    # wangy-mccl）换成宿主机名，统一用于 mpirun -host / ssh / scp / md5 / kill 寻址。
+    aliases = raw.get("MCCL_NODE_ALIASES") or {}
+    if not isinstance(aliases, dict):
+        aliases = {}
+    node_addrs = [aliases.get(n, n) for n in nodes]
     perf_args = (
         "-b {MCCL_PERF_BEGIN} -e {MCCL_PERF_END} -f {MCCL_PERF_FACTOR} "
         "-n {MCCL_PERF_ITERS} -c {MCCL_PERF_CHECK} -w {MCCL_PERF_WARMUP} "
@@ -216,7 +230,8 @@ def derive(raw, overridden_keys):
         "MCCL_NODE0_IP": nodes[0],
         "MCCL_NNODES": len(nodes),
         "MCCL_NP": len(nodes) * gpus,
-        "MCCL_HOST_SPEC": ",".join("{}:{}".format(ip, gpus) for ip in nodes),
+        "MCCL_HOST_SPEC": ",".join("{}:{}".format(a, gpus) for a in node_addrs),
+        "MCCL_NODE_ADDRS": " ".join(node_addrs),
         "MCCL_REMOTE_SRC": "{}/{}".format(
             raw["MCCL_REMOTE_WORKDIR"], raw["MCCL_REMOTE_SRC_REPO_NAME"]
         ),

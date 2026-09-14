@@ -101,7 +101,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc 'export MACA_PATH=$MCCL_MACA_PA
 
 ## 3. 编译节点与其余节点分发方式不同
 
-节点列表是`$MCCL_NODES`（空格分隔，第一个是编译节点，即`$MCCL_NODE0_IP`）。**所有节点宿主机的`/opt/maca/lib/`一律不更新**（`测试.md`明确禁止）。**（2026-08 更新：单节点冒烟测试场景已移除，动作①随之失去消费者——当前唯一的多节点测试只认`$MCCL_MACA_LIB_DIR`，即动作②。动作①的命令与说明保留作历史参考，新分发可只做②。）**跨节点验证用的是`$MCCL_MACA_LIB_DIR`——下面的表格按这条边界展开。
+节点列表是`$MCCL_NODES`（空格分隔，第一个是编译节点，即`$MCCL_NODE0_IP`）。**所有节点宿主机的`/opt/maca/lib/`一律不更新**（`测试.md`明确禁止）。**（2026-08 更新：单节点冒烟测试场景已移除，动作①随之失去消费者——当前唯一的多节点测试只认`$MCCL_MACA_LIB_DIR`，即动作②。动作①的命令与说明保留作历史参考，新分发可只做②。）**跨节点验证用的是`$MCCL_MACA_LIB_DIR`——下面的表格按这条边界展开。**对节点做远程寻址（ssh/scp/md5/kill）一律用 loader 派生的`$MCCL_NODE_ADDRS`**（把`MCCL_NODE_ALIASES`里"直连不可达"的节点替换成主机名，如节点58 -> `wangy-mccl`），不要拿`$MCCL_NODES`里的IP直连。
 
 `libmccl.so`编译出来停在`$MCCL_REMOTE_SRC/build/`里（编译流程只有`make -j50`，**没有`make install`**，产物不会自动进任何lib目录），必须靠下面的动作显式分发。
 
@@ -109,7 +109,7 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc 'export MACA_PATH=$MCCL_MACA_PA
 |---|---|---|
 | 编译产物来源 | 本机容器内`build/`目录，容器路径与宿主机`$MCCL_REMOTE_SRC`是同一份（bind mount），产物直接可见 | 无，只能接收 |
 | 分发动作①<br>（历史：给**单节点8卡**验证，该场景已于 2026-08 移除，仅参考） | `ssh`进宿主机后`docker exec`进容器，容器内`cp`到容器内`$MCCL_VENDOR_MACA_PATH/lib/` | 不适用——单节点验证只在编译节点的容器内跑，其余节点不参与 |
-| 分发动作②<br>（给**跨节点多卡**验证，仅`$MCCL_NNODES`>1时需要） | 同样`docker exec`进容器内`cp`，但目标是`$MCCL_MACA_LIB_DIR`。该目录位于`$MCCL_REMOTE_WORKDIR`下，容器内与宿主机是**同一份**（bind mount），所以在容器内写进去，宿主机上的mpirun就能加载到——**不需要、也没有第二条把它送出容器的动作** | 从编译节点直接`scp`到目标节点的`$MCCL_MACA_LIB_DIR`（宿主机层，不经容器）。单节点时`$MCCL_NODES`里没有"其余节点"，这一列自然为空，不执行 |
+| 分发动作②<br>（给**跨节点多卡**验证，仅`$MCCL_NNODES`>1时需要） | 在第一个节点宿主机层直接`cp`（**用户约定：不走容器**），目标是`$MCCL_MACA_LIB_DIR`。该目录位于`$MCCL_REMOTE_WORKDIR`下，宿主机上的mpirun加载的就是这份；构建产物`$MCCL_REMOTE_SRC/build/libmccl.so`经 bind mount 在宿主机直接可见，故宿主机层`cp`即可，无需进容器 | 从第一个节点（`$MCCL_NODE0_IP`）直接`scp`到目标节点的`$MCCL_MACA_LIB_DIR`（宿主机层，不经容器）。单节点时`$MCCL_NODES`里没有"其余节点"，这一列自然为空，不执行 |
 | 是否可编译/改源码 | 是，唯一编译节点 | 否，硬禁令（见`references/mccl-safety.md`第1条），只接受scp来的`libmccl.so` |
 
 **当前契约（单节点场景移除后）：多节点测试只需要动作②。** 动作②的`$MCCL_MACA_LIB_DIR`是跨节点mpirun（跑在**宿主机**上）通过`LD_LIBRARY_PATH`真正加载的那份。漏做动作②（尤其编译节点那一份），编译节点在多卡测试里加载的仍是上一次的旧库或根本没有这个文件——而测试agent的preflight会对`$MCCL_NNODES`个节点的`$MCCL_MACA_LIB_DIR`逐个`md5sum`，编译节点这一处第一时间就对不上。动作①只服务已移除的单节点冒烟（容器内`--mca plm isolated`跑的进程只看得见容器内`$MCCL_VENDOR_MACA_PATH/lib/`），保留在下文作历史参考。
@@ -122,18 +122,18 @@ ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "bash -lc 'export MACA_PATH=$MCCL_MACA_PA
 ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_VENDOR_MACA_PATH/lib/'"
 
 # 动作②：跨节点多卡验证用（bind mount 目录，宿主机 mpirun 加载的就是这份）。
-# 仅 $MCCL_NNODES > 1 时需要。编译节点自己走 docker exec + cp：
-ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "docker exec $MCCL_CONTAINER bash -c 'cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_MACA_LIB_DIR/'"
+# 仅 $MCCL_NNODES > 1 时需要。第一个节点直接在宿主机层 cp（用户约定：不走容器）：
+ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_MACA_LIB_DIR/"
 
-# 其余节点：循环 $MCCL_NODES 里除第一个之外的每一个，宿主机层 scp，
-# 源文件经 bind mount 在编译节点宿主机上直接可见，不套 docker exec。
-# 单节点时这个循环体为空，自然不执行。
-for ip in $(echo $MCCL_NODES | cut -d' ' -f2-); do
-  ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "scp $MCCL_SSH_OPTS $MCCL_REMOTE_SRC/build/libmccl.so root@$ip:$MCCL_MACA_LIB_DIR/"
+# 其余节点：循环 $MCCL_NODE_ADDRS 里除第一个之外的每一个地址，宿主机层 scp，
+# 源文件经 bind mount 在第一个节点宿主机上直接可见，不套 docker exec。
+# 直连不可达的节点用别名地址（如节点58 -> wangy-mccl）。单节点时这个循环体为空，自然不执行。
+for addr in $(echo $MCCL_NODE_ADDRS | cut -d' ' -f2-); do
+  ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "scp $MCCL_SSH_OPTS $MCCL_REMOTE_SRC/build/libmccl.so root@$addr:$MCCL_MACA_LIB_DIR/"
 done
 ```
 
-为什么编译节点与其余节点的动作②形态不同（一个`docker exec`+`cp`、一个`scp`）：目标目录是同一个（`$MCCL_MACA_LIB_DIR`），只是编译节点上这个目录本机就有、且容器内可直接写到，而其余节点要跨机器传输、且容器内没有ssh/scp客户端（见第6节），只能在宿主机层发起。
+为什么第一个节点与其余节点的动作②形态不同（一个宿主层直接`cp`、一个`scp`）：目标目录是同一个（`$MCCL_MACA_LIB_DIR`），只是第一个节点上构建产物与本机 lib 目录都在本机、且经 bind mount 在宿主机直接可见，故宿主层`cp`即可（**用户约定：不走容器**）；其余节点要跨机器传输，且容器内没有ssh/scp客户端（见第6节），只能在宿主机层发起`scp`。
 
 以上是**容器模式**（`$MCCL_CONTAINER`非空）下的分发方式。
 
@@ -146,14 +146,15 @@ done
 # 不再是"容器内外两份"，视两者实际路径关系而定，通常直接cp到$MCCL_MACA_LIB_DIR即可。
 ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "cp $MCCL_REMOTE_SRC/build/libmccl.so $MCCL_MACA_LIB_DIR/"
 
-# 其余节点：从编译节点 scp（这条和容器模式完全一样——容器模式下其余节点本来就是
-# 宿主机层scp，不经容器，无容器模式没有变化）
-for ip in $(echo $MCCL_NODES | cut -d' ' -f2-); do
-  ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "scp $MCCL_SSH_OPTS $MCCL_REMOTE_SRC/build/libmccl.so root@$ip:$MCCL_MACA_LIB_DIR/"
+# 其余节点：从第一个节点 scp（这条和容器模式完全一样——容器模式下其余节点本来就是
+# 宿主机层scp，不经容器，无容器模式没有变化。地址用 $MCCL_NODE_ADDRS，直连不可达
+# 的节点用别名，如节点58 -> wangy-mccl）
+for addr in $(echo $MCCL_NODE_ADDRS | cut -d' ' -f2-); do
+  ssh $MCCL_SSH_OPTS root@$MCCL_NODE0_IP "scp $MCCL_SSH_OPTS $MCCL_REMOTE_SRC/build/libmccl.so root@$addr:$MCCL_MACA_LIB_DIR/"
 done
 ```
 
-无容器模式下第2节那套"`/opt/maca/lib`双重身份/bind mount"整段不适用——没有容器内外之分，"同一路径两份"的问题不存在，一次`cp`就是全部分发动作。md5契约不变：仍是`$MCCL_NNODES + 1`份、全部一致，只是编译节点那份的产生方式从"`docker exec` cp"变成"直接`cp`"。
+无容器模式下第2节那套"`/opt/maca/lib`双重身份/bind mount"整段不适用——没有容器内外之分，"同一路径两份"的问题不存在，一次`cp`就是全部分发动作。md5契约不变：仍是`$MCCL_NNODES + 1`份、全部一致。**（2026-09 用户约定：第一个节点的动作②统一为宿主机层直接`cp`、不走容器，容器/无容器模式均如此——"直接`cp`"在容器模式下同样成立。）
 
 **编译节点的动作②是本工具包相对`测试.md`原始工作流的补充，不是抄来的。** `测试.md`的"分发`libmccl.so`到4节点"一节只有三条`scp`（发往其余三节点）加一条编译节点容器内到`/opt/maca/lib/`的`cp`，编译节点的`$MCCL_MACA_LIB_DIR`从头到尾没有被写过；同时全文只有`make -j50`、没有`make install`，产物也不会自流进去。也就是说，照`测试.md`的字面步骤执行，编译节点在多卡验证时加载的`libmccl.so`并非本次构建产物——这是原始工作流里一个真实存在的洞（原文当时能跑通，最可能是该文件由更早的某次操作留在了那里，`测试.md`未记载，本文档不替它补设定），不是本工具包新发明的要求。补上它是为了让"md5全一致"这条跨三方（开发第7节、dev卡点第11条、测试第4节）的契约在编译节点上真正可满足。
 
@@ -162,7 +163,7 @@ done
 > 2026-08 注：单节点冒烟已从测试场景移除（`agents/mccl-tester.md` 第2节），本节保留作背景——它解释了为什么跨节点验证必须在宿主机跑，这条边界仍然有效。
 
 - **单节点8卡**（历史场景）：在容器内跑，加`--mca plm isolated`，不依赖ssh。用于快速验证编译产物本身能跑通，不涉及跨节点通信路径。
-- **跨节点多卡**：在宿主机跑，mpirun通过`-host`拉起`$MCCL_NODES`里全部节点的进程，依赖宿主机ssh互通。**容器内没有ssh，这一步不可能在容器内做。**
+- **跨节点多卡**：在宿主机跑，mpirun通过`-host`（`$MCCL_HOST_SPEC`，别名已替换）拉起`$MCCL_NODE_ADDRS`里全部地址的进程，依赖宿主机ssh互通。**容器内没有ssh，这一步不可能在容器内做。**
 - `测试.md`曾记载：目标宿主机GLIBC版本与编译环境不匹配时，退回容器内单节点验证作为替代手段。单节点场景移除后，工具包不再提供这条兜底——GLIBC不匹配时应如实上报，而不是退回一个测不到跨节点路径的场景。
 
 ## 5. SSH跳板拓扑

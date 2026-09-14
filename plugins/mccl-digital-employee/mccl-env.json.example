@@ -2,7 +2,7 @@
   "_comments": {
     "usage": "cp 此文件为 mccl-env.json 并填入真实值。mccl-env.json 不入库（见 .gitignore）。所有 agent 经 bin/mccl-env-load.py 加载（eval \"$(python3 $TOOLKIT_ROOT/bin/mccl-env-load.py)\"），不得硬编码。loader 自动跳过 _ 前缀键（如本 _comments）。",
     "cross_platform": "配置脱离 bash 语法、OS 无关：Windows/macOS/Linux 用同一份 JSON。loader 是跨平台 Python，emit 的 bash export 由 agent 在本地 bash 里 eval（Windows 走 WSL）。loader 只在本地跑，远端机器不需要 python3。",
-    "raw_vs_derived": "本文件只填 raw 键（15 个环境键 + 9 个 MCCL_PERF_* 压测参数键 + 5 个 MCCL_AGATHER_* all_gather 键）。派生量（MCCL_NODE0_IP/MCCL_NNODES/MCCL_NP/MCCL_HOST_SPEC/MCCL_REMOTE_SRC/MCCL_LD_LIBRARY_PATH/MCCL_PERF_ARGS/MCCL_AGATHER_PERF_ARGS/MCCL_PERF_OVERRIDDEN_KEYS）由 loader 从 raw 算，不写在这里——改一处 IP 或一个压测参数，派生量自动跟上。",
+    "raw_vs_derived": "本文件只填 raw 键（15 个环境键 + 9 个 MCCL_PERF_* 压测参数键 + 5 个 MCCL_AGATHER_* all_gather 键）。派生量（MCCL_NODE0_IP/MCCL_NNODES/MCCL_NP/MCCL_HOST_SPEC/MCCL_NODE_ADDRS/MCCL_REMOTE_SRC/MCCL_LD_LIBRARY_PATH/MCCL_PERF_ARGS/MCCL_AGATHER_PERF_ARGS/MCCL_PERF_OVERRIDDEN_KEYS）由 loader 从 raw 算，不写在这里——改一处 IP 或一个压测参数，派生量自动跟上。",
     "setup_ssh": "换机器/换IP时：改完下面的IP，跑一次 bash <插件>/bin/mccl-setup-ssh。它只需配 本机 -> NODE0 一条链路（工具包一律经NODE0跳转），并检查 NODE0 -> 其余节点 和容器是否可达。密码只在交互时输入一次，不存盘。",
     "topology": "只支持两档节点数：4个IP->OAM32（-np 32）；8个IP->OAM64（-np 64）。其余节点数（含单节点）一律判为不支持的拓扑、停止上报——MCCL 只硬编码 OAM32/OAM64，CliqueManager::IsSupported() 不匹配其他形态，对称内存静默fallback到Ring/Tree，跑出来的不是你以为在测的东西（单节点冒烟场景已于 2026-08 移除，只保留真实多节点测试）。",
     "gpus_per_node": "MCCL_GPUS_PER_NODE 必须=8 才能对上代码硬编码的 nodeSize=8/GROUP=8（PCIe Switch 硬件决定）。填其他值一律判为不支持的拓扑，停止上报。",
@@ -19,10 +19,12 @@
     "ld_library_path": "MCCL_LD_LIBRARY_PATH（loader 派生 = MCCL_MACA_LIB_DIR:MCCL_OMPI_LIB_PATH）：多节点 mpirun 经 -x 注入。MCCL_OMPI_LIB_PATH 是 libmpi.so 所在目录。",
     "tcp_if": "MCCL_TCP_IF_INCLUDE：MPI TCP 网段 CIDR（多节点 btl_tcp_if_include 用）。",
     "ssh_opts": "MCCL_SSH_OPTS：所有 ssh/scp 必须带这组选项。BatchMode=yes 让密钥没配好时立刻失败而不是弹密码提示卡死。一般不需改。",
+    "node_alias": "MCCL_NODE_ALIASES（raw 键，{IP: 主机名} 的 JSON 对象，可选出）：给直连不可达的节点一个替代地址（宿主机不能直接访问、需经 ssh 到主机别名/容器的，如节点58 -> wangy-mccl）。loader 用它派生 MCCL_HOST_SPEC 与 MCCL_NODE_ADDRS（把别名节点换成主机名），统一作用于 mpirun -host / ssh / scp / md5 / kill。不填或填空对象时用 IP 原值，行为等同无别名。",
     "stress": "MCCL_STRESS_*（场景E，4节点 allreduce 加压测试，可选且仅按需触发）：用户明确说'跑加压测试'时才跑，/mccl-test 默认不跑。8 个键：BIN=all_reduce_perf 二进制路径，BEGIN/END=消息尺寸起止（-b/-e），STEP=步进字节数（-i，替代 -f 倍乘因子），ITERS=每尺寸正式迭代次数（-n），WARMUP=预热次数（-w），R=对称内存开关（-R，如 2）。执行键 CHECK/OP/DTYPE/GPU_CHECK_ITERS 复用上方的 MCCL_PERF_*（不必重复填）。LAUNCH_NODE=mpirun 发起节点（与标准场景的 NODE0 不同，加压测试可从其他节点发起），HOST_SPEC=mpirun -host 参数值（与 MCCL_HOST_SPEC 独立，因为加压场景可能从不同节点发起、需用不同主机名解析，如 58 用 wangy-mccl 主机名）。这些键全部不存在时 loader 不报错、tester 不跑场景E。STEP/ITERS/WARMUP/R 必须是整数，否则 loader 报错。loader 拼成 MCCL_STRESS_PERF_ARGS='-b BEGIN -e END -i STEP -n ITERS -c CHECK -w WARMUP -o OP -d DTYPE -G GPU_CHECK_ITERS'（CHECK/OP/DTYPE/GPU_CHECK_ITERS 从 MCCL_PERF_* 取值）。",
     "agather_stress": "MCCL_AGATHER_STRESS_*（场景F，4节点 allgather 加压测试，可选且仅按需触发）：用户明确说'allgather 加压测试'/'场景F'时才跑，/mccl-test 默认不跑。6 个键：BIN=all_gather_perf 二进制路径，BEGIN/END=消息尺寸起止（-b/-e），STEP=步进字节数（-i，替代 -f 倍乘因子），ITERS=每尺寸正式迭代次数（-n），WARMUP=预热次数（-w）。执行键 CHECK/OP/DTYPE/GPU_CHECK_ITERS 复用 MCCL_PERF_*，对称内存开关 R、发起节点 LAUNCH_NODE、-host 参数 HOST_SPEC 复用 MCCL_STRESS_R/LAUNCH_NODE/HOST_SPEC（与场景E 共享同一集群拓扑，不必重复填）。这些键全部不存在时 loader 不报错、tester 不跑场景F。STEP/ITERS/WARMUP 必须是整数，否则 loader 报错。loader 拼成 MCCL_AGATHER_STRESS_PERF_ARGS='-b BEGIN -e END -i STEP -n ITERS -c CHECK -w WARMUP -o OP -d DTYPE -G GPU_CHECK_ITERS'（CHECK/OP/DTYPE/GPU_CHECK_ITERS 从 MCCL_PERF_* 取值）。"
   },
   "MCCL_NODES": "<node0-ip> <node1-ip> <node2-ip> <node3-ip>",
+  "MCCL_NODE_ALIASES": {"<node-ip>": "<hostname>"},
   "MCCL_GPUS_PER_NODE": 8,
   "MCCL_SSH_OPTS": "-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new",
   "MCCL_CONTAINER": "<container-name>",

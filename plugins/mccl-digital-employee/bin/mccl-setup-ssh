@@ -23,9 +23,10 @@ eval "$(python3 "$SELF_DIR/mccl-env-load.py" "$ENV_JSON")"
 : "${MCCL_NODE0_IP:?mccl-env.json 里缺 MCCL_NODE0_IP（应由 MCCL_NODES 派生）}"
 : "${MCCL_NNODES:?mccl-env.json 里缺 MCCL_NNODES（应由 MCCL_NODES 派生）}"
 
-# 除编译节点外的其余节点（单节点时为空）
-PEERS="$(echo "$MCCL_NODES" | cut -d' ' -f2-)"
-[ "$PEERS" = "$MCCL_NODES" ] && PEERS=""   # 只有一个节点时 cut -f2- 会原样返回
+# 除第一个节点外的其余地址（单节点时为空）。用 $MCCL_NODE_ADDRS（别名已替换，
+# 如节点58 -> wangy-mccl，避免拿直连不可达的IP去探测）
+PEERS="$(echo "$MCCL_NODE_ADDRS" | cut -d' ' -f2-)"
+[ "$PEERS" = "$MCCL_NODE_ADDRS" ] && PEERS=""   # 只有一个节点时 cut -f2- 会原样返回
 
 echo "拓扑：$MCCL_NNODES 个节点，编译节点 $MCCL_NODE0_IP"
 case "$MCCL_NNODES" in
