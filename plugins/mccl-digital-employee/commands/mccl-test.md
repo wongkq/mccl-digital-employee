@@ -49,6 +49,17 @@ eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 
 触发后，在调度 mccl-tester 的 prompt 里加"本次需跑场景E（加压测试）"和/或"本次需跑场景F（allgather 加压测试）"。未触发时不加。
 
+## 1.7 集体匹配的场景选择（用户点明集体的常规测试）
+
+用户在本轮请求里点明要测的集体通信时，决定该跑哪一档**常规**场景（场景E/F仍按§1.6单独判定）。判定规则：
+
+- 用户说 **allreduce 常规测试**（"allreduce"/"all_reduce"/"归约"）→ **只跑场景A、B**（all_reduce 非对称/对称），**不得跑**场景C、D（allgather）
+- 用户说 **allgather 常规测试**（"allgather"/"all_gather"）→ **只跑场景C、D**（all_gather 非对称/对称），**不得跑**场景A、B
+- 用户点明具体场景（A/B/C/D/E/F）→ **只跑点明的那些**
+- 用户只说"测试/复测/回归验证"，未点明集体 → 维持默认：**跑A、B、C、D四个常规场景**
+
+判定后在调度 mccl-tester 的 prompt 里写清本次场景子集（如"本次只跑场景A、B（allreduce），不跑场景C、D"）。被排除的场景由 tester 在 `test-result.md` 注明"未跑（主控仅授权<集>）"，report 侧据此标"未覆盖"，不推断。
+
 ## 2. run 目录决定
 
 - **给定了 `<run目录>`（绝对路径）**：若是 `.mccl-runs/<ts>` 根目录（含 `attempt-*` 子目录），取最新 `attempt-N/` 作为本轮产物目录；若本身就是 `attempt-N/` 目录，直接使用。传给子代理的必须是这个绝对路径。
@@ -73,14 +84,14 @@ git diff > "$RUN_DIR/change.patch"
 - **测试规模**：`$MCCL_NNODES`节点 × `$MCCL_GPUS_PER_NODE`卡、`-np $MCCL_NP`、拓扑判定（OAM32/OAM64/不支持）、`$MCCL_PERF_ARGS`实际展开值；`$MCCL_PERF_OVERRIDDEN_KEYS`非空时注明哪些键被覆盖。
 - **产物目录**：`$RUN_DIR`绝对路径。
 - **MD5基准**：基准文件`$MCCL_REMOTE_SRC/build/libmccl.so`的md5值（即"前置分发"里算出的那份，直接引用）与文件路径；注明这是`mccl-tester`独立核对的基准，不采信任何自报值。
-- **测试命令**：场景A、场景B两条mpirun命令的**完整展开**--`$MCCL_*`逐个替换为loader实际值（不凭记忆拼），场景B末尾带`-R 2`、场景A不带，模板见`agents/mccl-tester.md`第3节。若触发场景E（加压测试），追加场景E的完整展开命令；若触发场景F（allgather 加压测试），追加场景F的完整展开命令。
+- **测试命令**：本轮待跑场景（按§1.7选中）的各条mpirun命令的**完整展开**--`$MCCL_*`逐个替换为loader实际值（不凭记忆拼），`-R 2`只在B/D末尾带、A/C不带，模板见`agents/mccl-tester.md`第3节。若触发场景E（加压测试），追加场景E的完整展开命令；若触发场景F（allgather 加压测试），追加场景F的完整展开命令。
 
 各字段必须来自刚 `eval` 过的 loader 实际值与刚跑的 `md5sum` 输出，不得凭记忆或模板填。主控这步的md5核对只是**给用户看的预览**；`mccl-tester` 的独立核对（`agents/mccl-tester.md` 第4节）不变、仍是唯一判据。摘要输出后再进第4节调度。
 
 ## 4. 调度 mccl-tester（测试）
 
 `Task(mccl-tester)`：
-- prompt 里写清 run 目录绝对路径、产物写该目录：`test-preflight.md`、`test-asymmetric.log`、`test-symmetric.log`、`test-agather-asymmetric.log`、`test-agather-symmetric.log`、`test-result.md`、异常时 `[test-anomaly.md]`；若触发场景E（§1.6），追加"本次需跑场景E（加压测试）"，另写明日志 `test-stress.log`；若触发场景F（§1.6），追加"本次需跑场景F（allgather 加压测试）"，另写明日志 `test-stress-agather.log`；若测试命中驱动 warm reset（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`），tester 会按 15 分钟间隔自动重试至多 5 次，重试日志为 `test-<场景>.retry-<k>.log`（`agents/mccl-tester.md` 第 5 节），这些文件一并供 reporter 参考。
+- prompt 里写清 run 目录绝对路径、按§1.7选定的场景子集（只跑A、B / 只跑C、D / A、B、C、D全跑 / 只跑点明场景）、产物写该目录：`test-preflight.md`、`test-asymmetric.log`、`test-symmetric.log`、`test-agather-asymmetric.log`、`test-agather-symmetric.log`、`test-result.md`、异常时 `[test-anomaly.md]`；若触发场景E（§1.6），追加"本次需跑场景E（加压测试）"，另写明日志 `test-stress.log`；若触发场景F（§1.6），追加"本次需跑场景F（allgather 加压测试）"，另写明日志 `test-stress-agather.log`；若测试命中驱动 warm reset（`MX_EVENTTYPE_DRIVER`/`mcErrorDriverWarmReset`），tester 会按 15 分钟间隔自动重试至多 5 次，重试日志为 `test-<场景>.retry-<k>.log`（`agents/mccl-tester.md` 第 5 节），这些文件一并供 reporter 参考。
 - 目录里已有的 `change.patch` / `dev-change.md` / `build.log` 若存在就传给 tester 作参考；不存在就明确告诉它"无上一轮开发产物，md5 基准以构建产物 `$MCCL_REMOTE_SRC/build/libmccl.so` 为准，自行计算"。
 - `mccl-tester` 会独立核对各节点 `libmccl.so` md5（不采信任何自报值）、md5 不一致时先重新分发构建产物（`references/mccl-remote-ops.md`第3节动作②）再复测、按 `$MCCL_NNODES` 选拓扑场景、跑 mpirun、落原始日志（`agents/mccl-tester.md`）。
 
