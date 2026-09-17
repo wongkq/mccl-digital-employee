@@ -60,6 +60,21 @@ eval "$(python3 "$TOOLKIT_ROOT/bin/mccl-env-load.py")"
 
 判定后在调度 mccl-tester 的 prompt 里写清本次场景子集（如"本次只跑场景A、B（allreduce），不跑场景C、D"）。被排除的场景由 tester 在 `test-result.md` 注明"未跑（主控仅授权<集>）"，report 侧据此标"未覆盖"，不推断。
 
+## 1.8 定时/无人值守链路的 GPU 占用清理
+
+本命令在**手动（交互式）调用**时默认**只读**处理 GPU 占用：若跑场景前发现其他进程占用 GPU，不 kill、只如实上报（`references/mccl-safety.md` 第9条——交互式探测不传 `--free-occupied`）。
+
+**例外——定时/无人值守触发**（用户授权，2026-09-17）：当 `/mccl-test` 由定时任务（CronCreate）在无人值守下触发时，主控在跑场景前先执行一次清理：
+
+```bash
+"$TOOLKIT_ROOT/bin/mccl-gpu-probe" --mode full --free-occupied --reuse-bw "$RUN_DIR/.bw-cache" --out "$RUN_DIR/gpu-verdict.json"
+```
+
+- 清理后 verdict=READY → 继续走测试；仍 NOT_READY/error → 停止并如实上报，不碰不该碰的进程。
+- 每次 kill/跳过逐条落在 `gpu-verdict.json` 的 `occupancy.killed`，在收尾时转述给用户（清理了多少个、明细见哪个文件）。
+- 约束：仅限 `$MCCL_NODES` 上的 GPU 占用进程；本流水线自身的测试进程（`mpirun`/`all_reduce_perf`/`all_gather_perf`/`gpu_health_check`）与 PID≤1 不得杀；不改文件、不重启节点（`references/mccl-safety.md` 第9条）。
+- **手动交互式调用默认不 kill**；若用户本轮明确要求"清掉占卡的再测"，才按上述 `--free-occupied` 处理。
+
 ## 2. run 目录决定
 
 - **给定了 `<run目录>`（绝对路径）**：若是 `.mccl-runs/<ts>` 根目录（含 `attempt-*` 子目录），取最新 `attempt-N/` 作为本轮产物目录；若本身就是 `attempt-N/` 目录，直接使用。传给子代理的必须是这个绝对路径。
